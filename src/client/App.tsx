@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useAuth, SignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
 import './App.css';
 
 const App: React.FC = () => {
@@ -6,15 +7,26 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const { getToken } = useAuth();
 
   useEffect(() => {
-    // Determine WebSocket URL based on current location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname;
-    const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-    const wsUrl = host === 'localhost' ? 'ws://localhost:8080' : `${protocol}//${host}:${port}`;
-    
-    const ws = new WebSocket(wsUrl);
+    const connectWebSocket = async () => {
+      try {
+        // Get auth token from Clerk
+        const token = await getToken();
+        if (!token) {
+          console.error('No auth token available');
+          return;
+        }
+        
+        // Determine WebSocket URL based on current location
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.hostname;
+        const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+        const wsUrl = host === 'localhost' ? 'ws://localhost:8080' : `${protocol}//${host}:${port}`;
+        
+        // Include token in WebSocket connection
+        const ws = new WebSocket(`${wsUrl}?token=${token}`);
     
     ws.onopen = () => {
       console.log('Connected to Breamer server');
@@ -43,10 +55,20 @@ const App: React.FC = () => {
 
     wsRef.current = ws;
 
-    return () => {
-      ws.close();
+        wsRef.current = ws;
+      } catch (error) {
+        console.error('Failed to connect:', error);
+      }
     };
-  }, []);
+    
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [getToken]);
 
   const handleNavigate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,6 +105,12 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
+      <SignedOut>
+        <div className="auth-container">
+          <SignIn />
+        </div>
+      </SignedOut>
+      <SignedIn>
       <header className="header">
         <div className="branding">
           <h1>BreamerVision™</h1>
@@ -111,6 +139,7 @@ const App: React.FC = () => {
           className="stream-canvas"
         />
       </main>
+      </SignedIn>
     </div>
   );
 };

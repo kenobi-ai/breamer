@@ -14,11 +14,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.36.0",
+    "@clerk/express": "^1.7.12",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.2.0",
     "puppeteer": "^23.11.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@flydotio/dockerfile": "^0.7.10",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.5",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
