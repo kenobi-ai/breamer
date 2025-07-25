@@ -1,0 +1,29 @@
+# fly.toml app configuration file generated for breamer on 2025-07-25T12:21:46+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'breamer'
+primary_region = 'lhr'
+
+[build]
+
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    
+  [[services.ports]]
+    port = 443
+    handlers = ["http", "tls"]
+
+[[vm]]
+  memory = '8gb'
+  cpu_kind = 'performance'
+  cpus = 2

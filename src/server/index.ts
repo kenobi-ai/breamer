@@ -1,9 +1,54 @@
 import puppeteer from 'puppeteer';
 import type { Browser, Page, CDPSession } from 'puppeteer';
 import { WebSocketServer } from 'ws';
-import type { IncomingMessage } from 'http';
+import { createServer } from 'http';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fileURLToPath } from 'url';
+import type { IncomingMessage, ServerResponse } from 'http';
 
-const wss = new WebSocketServer({ port: 8080 });
+const port = parseInt(process.env.PORT || '8080', 10);
+const host = '0.0.0.0';
+
+// Get directory path for ES modules
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+
+// Create HTTP server
+const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const url = req.url || '/';
+  
+  // Serve static files from dist directory
+  if (url === '/') {
+    try {
+      const html = readFileSync(join(__dirname, 'index.html'), 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+    } catch (err) {
+      console.error('Error serving index.html:', err);
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  } else if (url.startsWith('/assets/')) {
+    try {
+      const filePath = join(__dirname, url);
+      const ext = url.split('.').pop();
+      const contentType = ext === 'js' ? 'application/javascript' : 'text/css';
+      const content = readFileSync(filePath);
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(content);
+    } catch (err) {
+      console.error('Error serving asset:', url, err);
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  } else {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+});
+
+// Create WebSocket server using the HTTP server
+const wss = new WebSocketServer({ server });
 const browsers = new Map<string, Browser>();
 const pages = new Map<string, Page>();
 const cdpSessions = new Map<string, CDPSession>();
@@ -12,22 +57,24 @@ wss.on('connection', async (ws, req: IncomingMessage) => {
   const clientId = req.headers['sec-websocket-key'] || '';
   console.log(`Client connected: ${clientId}`);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--enable-gpu',
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins',
-      '--disable-site-isolation-trials'
-    ]
-  });
+  try {
+    const browser = await puppeteer.launch({
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        '--enable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins',
+        '--disable-site-isolation-trials'
+      ]
+    });
 
-  browsers.set(clientId, browser);
-  const page = await browser.newPage();
-  pages.set(clientId, page);
+    browsers.set(clientId, browser);
+    const page = await browser.newPage();
+    pages.set(clientId, page);
 
   await page.setViewport({ width: 1280, height: 720 });
 
@@ -112,7 +159,19 @@ wss.on('connection', async (ws, req: IncomingMessage) => {
     }
   });
 
-  await page.goto('https://example.com');
+    await page.goto('https://example.com');
+  } catch (error) {
+    console.error('Failed to launch browser:', error);
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to launch browser. Please try again.'
+    }));
+    ws.close();
+  }
 });
 
-console.log('Breamer server running on ws://localhost:8080');
+// Start the HTTP server
+server.listen(port, host, () => {
+  console.log(`Breamer server running on http://${host}:${port}`);
+  console.log(`WebSocket endpoint: ws://${host}:${port}`);
+});

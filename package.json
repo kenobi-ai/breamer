@@ -10,7 +10,7 @@
     "build": "pnpm run build:server && pnpm run build:client",
     "build:server": "tsc -p tsconfig.server.json",
     "build:client": "vite build",
-    "start": "node dist/server/index.js",
+    "start": "node dist/index.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,6 +18,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@flydotio/dockerfile": "^0.7.10",
     "@types/node": "^22.10.5",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
