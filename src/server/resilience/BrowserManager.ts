@@ -43,6 +43,9 @@ export class ResilientBrowserManager {
         const browser = await this.launchBrowser();
         const page = await this.createPage(browser);
         
+        // Navigate to black page BEFORE creating CDP session
+        await page.goto('data:text/html,<html><body style="background:#000;margin:0;padding:0;height:100vh;"></body></html>');
+        
         const cdpSession = await page.createCDPSession();
 
         const session: ClientSession = {

@@ -220,6 +220,13 @@ wss.on('connection', async (ws, req) => {
             ResilientMessageHandlers.sendHeartbeat(ws);
             break;
 
+          case 'request_screenshot_and_html':
+            await ResilientMessageHandlers.handleScreenshotAndHtml(
+              currentSession.page,
+              ws
+            );
+            break;
+
           default:
             ResilientMessageHandlers.sendError(ws, message.type, `Unknown message type: ${message.type}`);
         }

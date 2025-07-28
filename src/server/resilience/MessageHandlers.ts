@@ -192,6 +192,53 @@ export class ResilientMessageHandlers {
     );
   }
 
+  static async handleScreenshotAndHtml(
+    page: Page,
+    ws: WebSocket
+  ): Promise<void> {
+    console.log('Screenshot and HTML requested');
+    
+    await OperationManager.safe(
+      async () => {
+        // Take screenshot
+        const screenshot = await OperationManager.withTimeout(
+          page.screenshot({ 
+            encoding: 'base64',
+            type: 'jpeg',
+            quality: 90,
+            fullPage: true // Full page screenshot
+          }),
+          10000,
+          'Screenshot operation timed out'
+        );
+        
+        // Get complete HTML
+        const html = await OperationManager.withTimeout(
+          page.content(),
+          10000,
+          'HTML extraction timed out'
+        );
+        
+        console.log(`Screenshot size: ${screenshot.length}, HTML size: ${html.length}`);
+        
+        ws.send(JSON.stringify({
+          type: 'screenshot_and_html_response',
+          screenshot,
+          html
+        }));
+      },
+      undefined,
+      (error) => {
+        console.error('Screenshot/HTML error:', error);
+        ws.send(JSON.stringify({
+          type: 'screenshot_and_html_response',
+          status: 'error',
+          error: error.message
+        }));
+      }
+    );
+  }
+
   static sendError(ws: WebSocket, type: string, error: string): void {
     if (ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({
