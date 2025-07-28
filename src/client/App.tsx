@@ -53,9 +53,12 @@ const App: React.FC = () => {
       setIsConnected(false);
     };
 
-    wsRef.current = ws;
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setIsConnected(false);
+    };
 
-        wsRef.current = ws;
+    wsRef.current = ws;
       } catch (error) {
         console.error('Failed to connect:', error);
       }
@@ -84,7 +87,7 @@ const App: React.FC = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (1280 / rect.width);
-      const y = (e.clientY - rect.top) * (720 / rect.height);
+      const y = (e.clientY - rect.top) * (1280 / rect.height);
       
       wsRef.current.send(JSON.stringify({
         type: 'click',
@@ -133,7 +136,7 @@ const App: React.FC = () => {
         <canvas
           ref={canvasRef}
           width={1280}
-          height={720}
+          height={1280}
           onClick={handleCanvasClick}
           onWheel={handleCanvasScroll}
           className="stream-canvas"
