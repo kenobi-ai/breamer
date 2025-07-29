@@ -213,11 +213,14 @@ export class ResilientMessageHandlers {
         );
         
         // Get complete HTML
-        const html = await OperationManager.withTimeout(
+        let html = await OperationManager.withTimeout(
           page.content(),
           10000,
           'HTML extraction timed out'
         );
+        
+        // Remove all SVG elements from HTML
+        html = html.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '');
         
         console.log(`Screenshot size: ${screenshot.length}, HTML size: ${html.length}`);
         
