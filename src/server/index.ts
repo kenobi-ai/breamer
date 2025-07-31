@@ -58,6 +58,8 @@ const wsCircuitBreaker = OperationManager.createCircuitBreaker(10, 60000);
 // Create WebSocket server using the HTTP server with proper CORS
 const wss = new WebSocketServer({ 
   server,
+  perMessageDeflate: false, // Disable compression to reduce CPU load
+  maxPayload: 10 * 1024 * 1024, // 10MB max payload
   verifyClient: (info) => {
     // Allow connections from localhost during development
     const origin = info.origin || info.req.headers.origin;
@@ -80,6 +82,8 @@ const activeConnections = new Set<string>();
 wss.on('connection', async (ws, req) => {
   const clientId = req.headers['sec-websocket-key'] || '';
   let isAuthenticated = false;
+  const frameQueue: Array<{ data: any; sessionId: string }> = [];
+  let isSending = false;
   
   console.log('New WebSocket connection attempt from:', req.headers.origin);
 
@@ -110,6 +114,41 @@ wss.on('connection', async (ws, req) => {
       throw new Error('Failed to create browser session');
     }
 
+    // Queue management functions
+    const processFrameQueue = async () => {
+      if (isSending || frameQueue.length === 0 || ws.readyState !== ws.OPEN) {
+        return;
+      }
+      
+      isSending = true;
+      
+      while (frameQueue.length > 0 && ws.readyState === ws.OPEN) {
+        const frame = frameQueue.shift();
+        if (!frame) break;
+        
+        try {
+          // Check WebSocket bufferedAmount to avoid overwhelming the connection
+          if (ws.bufferedAmount > 5 * 1024 * 1024) { // 5MB threshold
+            console.warn(`WebSocket buffer full (${ws.bufferedAmount} bytes), pausing frame sending`);
+            frameQueue.unshift(frame); // Put it back
+            setTimeout(() => processFrameQueue(), 100); // Retry after 100ms
+            break;
+          }
+          
+          ws.send(JSON.stringify({
+            type: 'frame',
+            data: frame.data,
+            sessionId: frame.sessionId
+          }));
+        } catch (sendError) {
+          console.error('Failed to send frame:', sendError);
+          // Don't put it back in queue, just skip this frame
+        }
+      }
+      
+      isSending = false;
+    };
+
     // Start the screencast immediately
     await browserManager.initializeScreencast(session.cdpSession);
 
@@ -124,18 +163,16 @@ wss.on('connection', async (ws, req) => {
           console.warn(`Large frame detected: ${frameSize} bytes`);
         }
         
-        // Send frame immediately without wrapper
+        // Add frame to queue instead of sending directly
         if (ws.readyState === ws.OPEN) {
-          try {
-            ws.send(JSON.stringify({
-              type: 'frame',
-              data: frame.data,
-              sessionId: frame.sessionId
-            }));
-          } catch (sendError) {
-            console.error('Failed to send frame:', sendError);
-            // Don't crash on send failure, just skip this frame
+          // Drop old frames if queue is too large
+          if (frameQueue.length > 10) {
+            console.warn('Frame queue full, dropping oldest frame');
+            frameQueue.shift();
           }
+          
+          frameQueue.push({ data: frame.data, sessionId: frame.sessionId });
+          processFrameQueue();
         } else {
           console.warn('WebSocket not open, skipping frame');
         }
@@ -166,9 +203,21 @@ wss.on('connection', async (ws, req) => {
       console.error(`WebSocket error for ${clientId}:`, error);
     });
 
+    // Monitor WebSocket buffer status
+    const bufferMonitorInterval = setInterval(() => {
+      if (ws.readyState === ws.OPEN && ws.bufferedAmount > 0) {
+        console.log(`WebSocket buffer for ${clientId}: ${ws.bufferedAmount} bytes, queue: ${frameQueue.length} frames`);
+      }
+    }, 5000);
+
     // Set up ping/pong for connection health
     const pingInterval = setInterval(() => {
       if (ws.readyState === ws.OPEN) {
+        // Skip ping if buffer is too full
+        if (ws.bufferedAmount > 1024 * 1024) {
+          console.warn(`Skipping ping for ${clientId} due to full buffer (${ws.bufferedAmount} bytes)`);
+          return;
+        }
         ws.ping();
       }
     }, 30000);
@@ -264,9 +313,11 @@ wss.on('connection', async (ws, req) => {
     // Clean up on disconnect
     ws.on('close', async () => {
       console.log(`Client disconnected: ${clientId} (Active: ${activeConnections.size - 1})`);
+      console.log(`Final buffer state: ${ws.bufferedAmount} bytes, queue: ${frameQueue.length} frames`);
       
       clearInterval(pingInterval);
       clearInterval(connectionHealthInterval);
+      clearInterval(bufferMonitorInterval);
       activeConnections.delete(clientId);
       
       await OperationManager.safe(
