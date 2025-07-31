@@ -115,24 +115,49 @@ wss.on('connection', async (ws, req) => {
 
     // Set up resilient screencast frame handler
     session.cdpSession.on('Page.screencastFrame', async (frame) => {
-      console.log('Received frame:', frame.sessionId, 'data length:', frame.data?.length || 0);
-      
-      // Send frame immediately without wrapper
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'frame',
-          data: frame.data,
-          sessionId: frame.sessionId
-        }));
-      }
-
-      // Always acknowledge the frame
       try {
-        await session.cdpSession.send('Page.screencastFrameAck', {
-          sessionId: frame.sessionId
-        });
+        const frameSize = frame.data?.length || 0;
+        console.log('Received frame:', frame.sessionId, 'data length:', frameSize);
+        
+        // Check if frame is unusually large (>100KB)
+        if (frameSize > 100000) {
+          console.warn(`Large frame detected: ${frameSize} bytes`);
+        }
+        
+        // Send frame immediately without wrapper
+        if (ws.readyState === ws.OPEN) {
+          try {
+            ws.send(JSON.stringify({
+              type: 'frame',
+              data: frame.data,
+              sessionId: frame.sessionId
+            }));
+          } catch (sendError) {
+            console.error('Failed to send frame:', sendError);
+            // Don't crash on send failure, just skip this frame
+          }
+        } else {
+          console.warn('WebSocket not open, skipping frame');
+        }
+
+        // Always acknowledge the frame to prevent backpressure
+        try {
+          await session.cdpSession.send('Page.screencastFrameAck', {
+            sessionId: frame.sessionId
+          });
+        } catch (ackError) {
+          console.error('Frame ack error:', ackError);
+          // If we can't ack frames, the session is likely broken
+          if (ackError.message?.includes('Session closed') || ackError.message?.includes('Target closed')) {
+            console.error(`CDP session appears broken for client ${clientId}, marking for recovery`);
+            const currentSession = await browserManager.getSession(clientId);
+            if (currentSession) {
+              currentSession.isHealthy = false;
+            }
+          }
+        }
       } catch (error) {
-        console.error('Frame ack error:', error);
+        console.error('Fatal error in screencast frame handler:', error);
       }
     });
 
@@ -160,7 +185,7 @@ wss.on('connection', async (ws, req) => {
         ws.terminate();
       }
       pongReceived = false;
-    }, 35000);
+    }, 45000); // Increased from 35s to 45s for 15s grace period
 
     // Handle incoming messages with resilience
     ws.on('message', async (data) => {

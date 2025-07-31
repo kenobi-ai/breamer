@@ -89,7 +89,9 @@ export class ResilientBrowserManager {
         '--disable-site-isolation-trials',
         '--disable-blink-features=AutomationControlled',
         '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--max-old-space-size=512' // Limit memory usage
+        '--max-old-space-size=2048', // Increased memory limit to 2GB
+        '--disable-gpu-sandbox',
+        '--disable-software-rasterizer'
       ],
       handleSIGINT: false,
       handleSIGTERM: false,
@@ -99,7 +101,26 @@ export class ResilientBrowserManager {
     // Set up browser crash handler
     browser.on('disconnected', () => {
       console.error('Browser disconnected unexpectedly');
+      // Mark all sessions using this browser as unhealthy
+      for (const [clientId, session] of this.sessions.entries()) {
+        if (session.browser === browser) {
+          session.isHealthy = false;
+          console.error(`Marking session ${clientId} as unhealthy due to browser disconnect`);
+        }
+      }
     });
+
+    // Monitor browser process
+    const browserProcess = browser.process();
+    if (browserProcess) {
+      browserProcess.on('exit', (code, signal) => {
+        console.error(`Browser process exited with code ${code} and signal ${signal}`);
+      });
+      
+      browserProcess.on('error', (error) => {
+        console.error('Browser process error:', error);
+      });
+    }
 
     return browser;
   }
@@ -152,10 +173,10 @@ export class ResilientBrowserManager {
     
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: 80,
+      quality: 60, // Reduced from 80 to reduce frame size
       maxWidth: 1280,
       maxHeight: 1280,
-      everyNthFrame: 1
+      everyNthFrame: 2 // Only capture every 2nd frame to reduce load
     });
     console.log('Screencast started');
   }
@@ -175,11 +196,30 @@ export class ResilientBrowserManager {
     try {
       // Check if browser is still connected
       if (!session.browser.isConnected()) {
+        console.error(`Browser disconnected for session ${clientId}`);
         throw new Error('Browser disconnected');
+      }
+
+      // Check browser process
+      const browserProcess = session.browser.process();
+      if (!browserProcess || browserProcess.killed) {
+        console.error(`Browser process dead for session ${clientId}`);
+        throw new Error('Browser process dead');
       }
 
       // Check if page is still responsive
       await session.page.evaluate(() => true);
+      
+      // Check CDP session
+      try {
+        await session.cdpSession.send('Runtime.evaluate', {
+          expression: '1+1',
+          returnByValue: true
+        });
+      } catch (cdpError) {
+        console.error(`CDP session unresponsive for ${clientId}:`, cdpError);
+        throw new Error('CDP session unresponsive');
+      }
       
       // Reset failure count on success
       session.healthCheckFailures = 0;
@@ -190,7 +230,7 @@ export class ResilientBrowserManager {
       
       if (session.healthCheckFailures >= this.options.maxHealthCheckFailures) {
         session.isHealthy = false;
-        console.log(`Session ${clientId} marked as unhealthy, attempting recovery...`);
+        console.log(`Session ${clientId} marked as unhealthy after ${session.healthCheckFailures} failures, attempting recovery...`);
         await this.recoverSession(clientId);
       }
     }
