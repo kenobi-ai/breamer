@@ -25,13 +25,13 @@ export class ResilientBrowserManager {
   constructor(options: BrowserManagerOptions = {}) {
     this.options = {
       maxRetries: options.maxRetries ?? 3,
-      healthCheckInterval: options.healthCheckInterval ?? 10000,
-      sessionTimeout: options.sessionTimeout ?? 300000, // 5 minutes
-      maxHealthCheckFailures: options.maxHealthCheckFailures ?? 3
+      healthCheckInterval: options.healthCheckInterval ?? 15000, // 15 seconds
+      sessionTimeout: options.sessionTimeout ?? 600000, // 10 minutes
+      maxHealthCheckFailures: options.maxHealthCheckFailures ?? 5
     };
 
-    // Global cleanup interval
-    setInterval(() => this.cleanupStaleSessions(), 60000);
+    // Global cleanup interval - less aggressive
+    setInterval(() => this.cleanupStaleSessions(), 300000); // 5 minutes
   }
 
   async createSession(clientId: string): Promise<ClientSession> {
@@ -244,7 +244,12 @@ export class ResilientBrowserManager {
   }
 
   private async recoverSession(clientId: string): Promise<void> {
-    console.log(`Attempting to recover session for ${clientId}`);
+    console.log(`[Recovery] Starting session recovery for ${clientId} at ${new Date().toLocaleTimeString()}`);
+    
+    const oldSession = this.sessions.get(clientId);
+    if (oldSession) {
+      console.log(`[Recovery] Old session state: isHealthy=${oldSession.isHealthy}, healthCheckFailures=${oldSession.healthCheckFailures}`);
+    }
     
     // Clean up old session
     await this.cleanupSession(clientId, false);
@@ -252,9 +257,18 @@ export class ResilientBrowserManager {
     try {
       // Create new session
       await this.createSession(clientId);
-      console.log(`Successfully recovered session for ${clientId}`);
+      console.log(`[Recovery] Successfully recovered session for ${clientId} at ${new Date().toLocaleTimeString()}`);
+      
+      // Send recovery notification to client
+      const ws = (global as any).activeConnections?.get(clientId);
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'session_recovered',
+          message: 'Browser session was recovered successfully'
+        }));
+      }
     } catch (error) {
-      console.error(`Failed to recover session for ${clientId}:`, error);
+      console.error(`[Recovery] Failed to recover session for ${clientId}:`, error);
       // Session will be cleaned up by caller
     }
   }
@@ -266,8 +280,20 @@ export class ResilientBrowserManager {
     // Update last activity
     session.lastActivity = Date.now();
 
-    // Return null if unhealthy
-    if (!session.isHealthy) return null;
+    // If session is unhealthy, attempt recovery
+    if (!session.isHealthy) {
+      console.log(`Session ${clientId} is unhealthy, attempting recovery...`);
+      await this.recoverSession(clientId);
+      
+      // Get the newly created session
+      const newSession = this.sessions.get(clientId);
+      if (!newSession || !newSession.isHealthy) {
+        console.error(`Failed to recover session ${clientId}`);
+        return null;
+      }
+      
+      return newSession;
+    }
 
     return session;
   }

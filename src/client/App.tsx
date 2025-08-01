@@ -22,8 +22,10 @@ const App: React.FC = () => {
         // Determine WebSocket URL based on current location
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.hostname;
-        const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-        const wsUrl = host === 'localhost' ? 'ws://localhost:8080' : `${protocol}//${host}:${port}`;
+        // For production, don't specify port - let it use default 443 for wss
+        const wsUrl = host === 'localhost' 
+          ? 'ws://localhost:8080' 
+          : `${protocol}//${host}`;
         
         // Include token in WebSocket connection
         const ws = new WebSocket(`${wsUrl}?token=${token}`);

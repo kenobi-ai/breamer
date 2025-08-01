@@ -1,435 +1,213 @@
-import { WebSocketServer } from 'ws';
 import express from 'express';
-import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import { ResilientBrowserManager } from './resilience/BrowserManager.js';
 import { ResilientMessageHandlers } from './resilience/MessageHandlers.js';
-import { OperationManager } from './resilience/OperationManager.js';
 
-dotenv.config();
-
-const port = parseInt(process.env.PORT || '8080', 10);
-const host = '0.0.0.0';
-
-// Allowed origins configuration
-const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'https://localhost:3000',
-  /^https:\/\/.*\.kenobi\.ai$/  // Regex for any subdomain of kenobi.ai
-];
-
-// Origin validation helper
-const isOriginAllowed = (origin: string | undefined): boolean => {
-  if (!origin) return false;
-  
-  return ALLOWED_ORIGINS.some(allowedOrigin => {
-    if (allowedOrigin instanceof RegExp) {
-      return allowedOrigin.test(origin);
-    }
-    return allowedOrigin === origin;
-  });
-};
-
-// Create Express app
 const app = express();
+const httpServer = createServer(app);
 
-// CORS and origin protection middleware
-app.use((req, res, next) => {
-  // Skip origin check for health endpoint
-  if (req.path === '/health') {
-    next();
-    return;
+// Configure Socket.io with CORS
+const io = new Server(httpServer, {
+  path: '/socket.io/',
+  cors: {
+    origin: '*', // Allow all origins for debugging
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  // Increased timeouts for long-lived connections
+  pingInterval: 60000,  // 60 seconds
+  pingTimeout: 300000,  // 5 minutes
+  // Prefer WebSocket for better performance
+  transports: ['websocket', 'polling'],
+  // Connection state recovery
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 120000, // 2 minutes
+    skipMiddlewares: true
   }
-  
-  const origin = req.headers.origin;
-  
-  if (origin && isOriginAllowed(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  }
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    if (origin && isOriginAllowed(origin)) {
-      res.sendStatus(200);
-    } else {
-      res.sendStatus(403);
-    }
-    return;
-  }
-  
-  // Block requests from disallowed origins
-  if (origin && !isOriginAllowed(origin)) {
-    console.log(`Blocked request from unauthorized origin: ${origin}`);
-    res.status(403).json({ error: 'Origin not allowed' });
-    return;
-  }
-  
-  next();
 });
 
-// Simple root route - just return a smiley face
-app.get('/', (req, res) => {
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.send('😊');
+// Simple health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'breamer', socketio: 'enabled' });
 });
 
-// Create HTTP server from Express app
-const server = app.listen(port, host, () => {
-  console.log(`Breamer server running on http://${host}:${port}`);
-  console.log(`WebSocket endpoint: ws://${host}:${port}`);
-});
-
-// Create resilient browser manager
+// Initialize browser manager with long-lived connection settings
 const browserManager = new ResilientBrowserManager({
-  maxRetries: 3,
-  healthCheckInterval: 10000,
-  sessionTimeout: 300000,
-  maxHealthCheckFailures: 3
+  healthCheckInterval: 60000,  // 60 seconds
+  sessionTimeout: 1800000,     // 30 minutes
+  maxHealthCheckFailures: 5    // More tolerance for failures
 });
 
-// Circuit breaker for WebSocket connections
-const wsCircuitBreaker = OperationManager.createCircuitBreaker(10, 60000);
-
-// Create WebSocket server using the HTTP server with proper CORS
-const wss = new WebSocketServer({ 
-  server,
-  perMessageDeflate: false, // Disable compression to reduce CPU load
-  maxPayload: 10 * 1024 * 1024, // 10MB max payload
-  verifyClient: (info: { origin?: string; req: { headers: { origin?: string } } }) => {
-    const origin = info.origin || info.req.headers.origin;
-    console.log('WebSocket verify client from origin:', origin);
-    
-    // Check if origin is allowed
-    if (origin && isOriginAllowed(origin)) {
-      console.log('WebSocket connection allowed from:', origin);
-      return true;
-    }
-    
-    // Block connections from disallowed origins
-    if (origin) {
-      console.log('WebSocket connection blocked from unauthorized origin:', origin);
-      return false;
-    }
-    
-    // Block connections without origin header for security
-    console.log('WebSocket connection blocked: no origin header');
-    return false;
-  }
+// Debug Socket.io
+io.engine.on('connection_error', (err: any) => {
+  console.log('[Socket.io] Connection error:', err.req);
+  console.log('[Socket.io] Error type:', err.type);
+  console.log('[Socket.io] Error message:', err.message);
 });
 
-// Track active connections for monitoring
-const activeConnections = new Set<string>();
+// Additional debugging
+io.engine.on('initial_headers', (headers: any, req: any) => {
+  console.log('[Socket.io] Initial headers from:', req.url);
+});
 
-wss.on('connection', async (ws, req) => {
-  const clientId = req.headers['sec-websocket-key'] || '';
-  let isAuthenticated = false;
-  const frameQueue: Array<{ data: any; sessionId: string }> = [];
-  let isSending = false;
+io.engine.on('headers', (headers: any, req: any) => {
+  headers['Access-Control-Allow-Private-Network'] = true;
+});
+
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  const clientId = socket.id;
+  console.log(`[Socket.io] Client connected: ${clientId} (Active: ${io.engine.clientsCount})`);
   
-  console.log('New WebSocket connection attempt from:', req.headers.origin);
+  // Send immediate acknowledgment
+  socket.emit('connected', { clientId });
 
-  try {
-    // Extract auth token
-    // const url = new URL(req.url || '', `http://${req.headers.host}`);
-    // const token = url.searchParams.get('token') || req.headers.authorization?.replace('Bearer ', '');
-    
-    // console.log('Token received:', token ? 'Yes' : 'No');
-    
-    // if (!token) {
-    //   ResilientMessageHandlers.sendError(ws, 'auth', 'Authentication required');
-    //   ws.close();
-    //   return;
-    // }
-
-    // TODO: Implement proper Clerk token verification
-    isAuthenticated = true;
-    activeConnections.add(clientId);
-    console.log(`Authenticated client connected: ${clientId} (Active: ${activeConnections.size})`);
-
-    // Create browser session with circuit breaker protection
-    const session = await wsCircuitBreaker.execute(async () => {
-      return await browserManager.createSession(clientId);
-    });
-
-    if (!session) {
-      throw new Error('Failed to create browser session');
-    }
-
-    // Queue management functions
-    const processFrameQueue = async () => {
-      if (isSending || frameQueue.length === 0 || ws.readyState !== ws.OPEN) {
+  // Initialize browser session asynchronously
+  setTimeout(async () => {
+    try {
+      console.log(`[Socket.io] Creating browser session for ${clientId}...`);
+      const session = await browserManager.createSession(clientId);
+      if (!session) {
+        socket.emit('error', { message: 'Failed to create browser session' });
         return;
       }
+
+      console.log(`[Socket.io] Browser session created for ${clientId}`);
       
-      isSending = true;
+      // Initialize screencast BEFORE setting up handlers
+      await browserManager.initializeScreencast(session.cdpSession);
       
-      while (frameQueue.length > 0 && ws.readyState === ws.OPEN) {
-        const frame = frameQueue.shift();
-        if (!frame) break;
-        
+      socket.emit('session_ready', { message: 'Browser session is ready' });
+
+      // Set up screencast frame handler
+      session.cdpSession.on('Page.screencastFrame', async (frame: any) => {
         try {
-          // Check WebSocket bufferedAmount to avoid overwhelming the connection
-          if (ws.bufferedAmount > 5 * 1024 * 1024) { // 5MB threshold
-            console.warn(`WebSocket buffer full (${ws.bufferedAmount} bytes), pausing frame sending`);
-            frameQueue.unshift(frame); // Put it back
-            setTimeout(() => processFrameQueue(), 100); // Retry after 100ms
-            break;
-          }
-          
-          ws.send(JSON.stringify({
-            type: 'frame',
+          // Send frame to client
+          socket.emit('frame', {
             data: frame.data,
-            sessionId: frame.sessionId
-          }));
-        } catch (sendError) {
-          console.error('Failed to send frame:', sendError);
-          // Don't put it back in queue, just skip this frame
-        }
-      }
-      
-      isSending = false;
-    };
+            sessionId: String(frame.sessionId)
+          });
 
-    // Start the screencast immediately
-    await browserManager.initializeScreencast(session.cdpSession);
-
-    // Set up resilient screencast frame handler
-    session.cdpSession.on('Page.screencastFrame', async (frame: { sessionId: number; data?: string }) => {
-      try {
-        const frameSize = frame.data?.length || 0;
-        console.log('Received frame:', frame.sessionId, 'data length:', frameSize);
-        
-        // Check if frame is unusually large (>100KB)
-        if (frameSize > 100000) {
-          console.warn(`Large frame detected: ${frameSize} bytes`);
-        }
-        
-        // Add frame to queue instead of sending directly
-        if (ws.readyState === ws.OPEN) {
-          // Drop old frames if queue is too large
-          if (frameQueue.length > 10) {
-            console.warn('Frame queue full, dropping oldest frame');
-            frameQueue.shift();
-          }
-          
-          frameQueue.push({ data: frame.data, sessionId: String(frame.sessionId) });
-          processFrameQueue();
-        } else {
-          console.warn('WebSocket not open, skipping frame');
-        }
-
-        // Always acknowledge the frame to prevent backpressure
-        try {
+          // Acknowledge frame
           await session.cdpSession.send('Page.screencastFrameAck', {
             sessionId: Number(frame.sessionId)
+          }).catch((error) => {
+            console.error('Frame ack error:', error);
           });
-        } catch (ackError) {
-          console.error('Frame ack error:', ackError);
-          // If we can't ack frames, the session is likely broken
-          if ((ackError as Error).message?.includes('Session closed') || (ackError as Error).message?.includes('Target closed')) {
-            console.error(`CDP session appears broken for client ${clientId}, marking for recovery`);
-            const currentSession = await browserManager.getSession(clientId);
-            if (currentSession) {
-              currentSession.isHealthy = false;
-            }
-          }
+        } catch (error) {
+          console.error('Error in screencast frame handler:', error);
         }
-      } catch (error) {
-        console.error('Fatal error in screencast frame handler:', error);
-      }
-    });
+      });
 
-    // Set up WebSocket error handling
-    ws.on('error', (error) => {
-      console.error(`WebSocket error for ${clientId}:`, error);
-    });
-
-    // Monitor WebSocket buffer status
-    const bufferMonitorInterval = setInterval(() => {
-      if (ws.readyState === ws.OPEN && ws.bufferedAmount > 0) {
-        console.log(`WebSocket buffer for ${clientId}: ${ws.bufferedAmount} bytes, queue: ${frameQueue.length} frames`);
-      }
-    }, 5000);
-
-    // Set up ping/pong for connection health
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === ws.OPEN) {
-        // Skip ping if buffer is too full
-        if (ws.bufferedAmount > 1024 * 1024) {
-          console.warn(`Skipping ping for ${clientId} due to full buffer (${ws.bufferedAmount} bytes)`);
-          return;
-        }
-        ws.ping();
-      }
-    }, 30000);
-
-    let pongReceived = true;
-    ws.on('pong', () => {
-      pongReceived = true;
-    });
-
-    // Check for dead connections
-    const connectionHealthInterval = setInterval(() => {
-      if (!pongReceived) {
-        console.log(`Client ${clientId} failed to respond to ping, closing connection`);
-        ws.terminate();
-      }
-      pongReceived = false;
-    }, 45000); // Increased from 35s to 45s for 15s grace period
-
-    // Handle incoming messages with resilience
-    ws.on('message', async (data) => {
-      try {
-        const message = JSON.parse(data.toString());
-        const currentSession = await browserManager.getSession(clientId);
-        
-        if (!currentSession) {
-          ResilientMessageHandlers.sendError(ws, message.type, 'Session not available');
-          return;
-        }
-
-        switch (message.type) {
-          case 'navigate':
-            console.log(`Client ${clientId} requested navigation to:`, message.url);
-            await ResilientMessageHandlers.handleNavigate(
-              currentSession.page,
-              ws,
-              message.url
-            );
-            break;
-
-          case 'click':
-            await ResilientMessageHandlers.handleClick(
-              currentSession.page,
-              ws,
-              message.x,
-              message.y
-            );
-            break;
-
-          case 'scroll':
-            await ResilientMessageHandlers.handleScroll(
-              currentSession.page,
-              ws,
-              message.deltaY
-            );
-            break;
-
-          case 'type':
-            await ResilientMessageHandlers.handleType(
-              currentSession.page,
-              ws,
-              message.text
-            );
-            break;
-
-          case 'evaluate':
-            await ResilientMessageHandlers.handleEvaluate(
-              currentSession.page,
-              ws,
-              message.code
-            );
-            break;
-
-          case 'heartbeat':
-            ResilientMessageHandlers.sendHeartbeat(ws);
-            break;
-
-          case 'request_screenshot_and_html':
-            await ResilientMessageHandlers.handleScreenshotAndHtml(
-              currentSession.page,
-              ws
-            );
-            break;
-
-          default:
-            ResilientMessageHandlers.sendError(ws, message.type, `Unknown message type: ${message.type}`);
-        }
-      } catch (error) {
-        console.error(`Message handling error for ${clientId}:`, error);
-        ResilientMessageHandlers.sendError(ws, 'message', 'Failed to process message');
-      }
-    });
-
-    // Clean up on disconnect
-    ws.on('close', async () => {
-      console.log(`Client disconnected: ${clientId} (Active: ${activeConnections.size - 1})`);
-      console.log(`Final buffer state: ${ws.bufferedAmount} bytes, queue: ${frameQueue.length} frames`);
-      
-      clearInterval(pingInterval);
-      clearInterval(connectionHealthInterval);
-      clearInterval(bufferMonitorInterval);
-      activeConnections.delete(clientId);
-      
-      await OperationManager.safe(
-        async () => {
-          await browserManager.cleanupSession(clientId);
-        },
-        undefined,
-        (error: unknown) => console.error(`Cleanup error for ${clientId}:`, error)
-      );
-    });
-
-  } catch (error) {
-    console.error('Connection setup failed:', error);
-    ResilientMessageHandlers.sendError(ws, 'connection', 'Failed to establish connection');
-    
-    if (isAuthenticated) {
-      activeConnections.delete(clientId);
+    } catch (error) {
+      console.error(`Failed to initialize session for ${clientId}:`, error);
+      socket.emit('error', { message: 'Failed to initialize browser session' });
     }
-    
-    ws.close();
-  }
+  }, 100); // Small delay to ensure connection is established
+
+  // Message handlers
+  socket.on('navigate', async (data) => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'navigate', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleNavigate(session.page, socket, data.url);
+  });
+
+  socket.on('click', async (data) => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'click', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleClick(session.page, socket, data.x, data.y);
+  });
+
+  socket.on('scroll', async (data) => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'scroll', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleScroll(session.page, socket, data.deltaY);
+  });
+
+  socket.on('hover', async (data) => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'hover', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleHover(session.page, socket, data.x, data.y);
+  });
+
+  socket.on('type', async (data) => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'type', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleType(session.page, socket, data.text);
+  });
+
+  socket.on('evaluate', async (data) => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'evaluate', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleEvaluate(session.page, socket, data.code);
+  });
+
+  socket.on('request_screenshot_and_html', async () => {
+    const session = await browserManager.getSession(clientId);
+    if (!session) {
+      socket.emit('error', { type: 'screenshot', message: 'Session not available' });
+      return;
+    }
+    await ResilientMessageHandlers.handleScreenshotAndHtml(session.page, socket);
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', async () => {
+    console.log(`Client disconnected: ${clientId} (Active: ${io.engine.clientsCount - 1})`);
+    await browserManager.cleanupSession(clientId);
+  });
+
+  // Handle errors
+  socket.on('error', (error) => {
+    console.error(`Socket error for ${clientId}:`, error);
+  });
 });
 
-// Graceful shutdown handler
-const gracefulShutdown = async (signal: string) => {
-  console.log(`\nReceived ${signal}, starting graceful shutdown...`);
-  
-  // Stop accepting new connections
-  server.close(() => {
-    console.log('HTTP server closed');
-  });
-
-  // Close all WebSocket connections
-  wss.clients.forEach((ws) => {
-    ws.close();
-  });
-
-  // Clean up all browser sessions
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\nShutting down gracefully...');
   await browserManager.cleanupAll();
-  
-  console.log('Graceful shutdown complete');
-  process.exit(0);
-};
-
-// Handle shutdown signals
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// Handle uncaught errors
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
-  // Don't exit - try to recover
+  io.close(() => {
+    console.log('Socket.io server closed');
+    process.exit(0);
+  });
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled rejection at:', promise, 'reason:', reason);
-  // Don't exit - try to recover
+process.on('SIGTERM', async () => {
+  console.log('\nShutting down gracefully...');
+  await browserManager.cleanupAll();
+  io.close(() => {
+    console.log('Socket.io server closed');
+    process.exit(0);
+  });
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  const health = {
-    status: 'ok',
-    uptime: process.uptime(),
-    activeConnections: activeConnections.size,
-    circuitBreaker: wsCircuitBreaker.getState(),
-    timestamp: Date.now()
-  };
-  res.json(health);
+// Start server
+const PORT = process.env.PORT || 3003;
+const HOST = '0.0.0.0'; // Listen on all interfaces
+httpServer.listen(PORT, HOST, () => {
+  console.log(`🚀 Breamer server running on ${HOST}:${PORT}`);
+  console.log(`🔌 Socket.io server ready at http://localhost:${PORT}`);
+  console.log(`📡 Socket.io path: /socket.io/`);
+  console.log(`🔧 CORS: Allowing all origins (*) for debugging`);
+  console.log(`🔄 Transports: websocket, polling`);
 });
-
-console.log('Cockroach mode activated 🪳');

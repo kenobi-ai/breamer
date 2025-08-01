@@ -1,11 +1,11 @@
 import type { Page } from 'puppeteer';
-import type { WebSocket } from 'ws';
+import type { Socket } from 'socket.io';
 import { OperationManager } from './OperationManager.js';
 
 export class ResilientMessageHandlers {
   static async handleNavigate(
     page: Page,
-    ws: WebSocket,
+    socket: Socket,
     url: string
   ): Promise<void> {
     console.log('Navigation requested to:', url);
@@ -37,227 +37,197 @@ export class ResilientMessageHandlers {
           );
         }
         
-        ws.send(JSON.stringify({
-          type: 'navigation',
+        socket.emit('navigation', {
           status: 'success',
           url: targetUrl
-        }));
+        });
       } catch (error) {
         const err = error as Error;
         console.error('Navigation error:', err.message);
-        ws.send(JSON.stringify({
-          type: 'navigation',
+        socket.emit('navigation', {
           status: 'error',
           error: err.message
-        }));
-        throw error; // Re-throw for retry mechanism
+        });
+        throw error;
       }
-    }, { retries: 2, backoff: 1000, timeout: 40000 });
+    });
   }
 
   static async handleClick(
     page: Page,
-    ws: WebSocket,
+    socket: Socket,
     x: number,
     y: number
   ): Promise<void> {
-    await OperationManager.safe(
-      async () => {
-        await OperationManager.withTimeout(
-          page.mouse.click(x, y),
-          5000,
-          'Click operation timed out'
-        );
-        ws.send(JSON.stringify({
-          type: 'click',
+    await OperationManager.withRetry(async () => {
+      try {
+        await page.mouse.click(x, y);
+        socket.emit('click', {
           status: 'success',
           x,
           y
-        }));
-      },
-      undefined,
-      (error: unknown) => {
-        console.error('Click error:', error);
-        ws.send(JSON.stringify({
-          type: 'click',
+        });
+      } catch (error) {
+        const err = error as Error;
+        console.error('Click error:', err.message);
+        socket.emit('click', {
           status: 'error',
-          error: (error as Error).message
-        }));
+          error: err.message
+        });
+        throw error;
       }
-    );
+    });
   }
 
   static async handleScroll(
     page: Page,
-    ws: WebSocket,
+    socket: Socket,
     deltaY: number
   ): Promise<void> {
-    await OperationManager.safe(
-      async () => {
-        await OperationManager.withTimeout(
-          page.mouse.wheel({ deltaY }),
-          5000,
-          'Scroll operation timed out'
-        );
-        ws.send(JSON.stringify({
-          type: 'scroll',
+    await OperationManager.withRetry(async () => {
+      try {
+        await page.evaluate((scrollAmount) => {
+          window.scrollBy(0, scrollAmount);
+        }, deltaY);
+        
+        socket.emit('scroll', {
           status: 'success',
           deltaY
-        }));
-      },
-      undefined,
-      (error: unknown) => {
-        console.error('Scroll error:', error);
-        ws.send(JSON.stringify({
-          type: 'scroll',
+        });
+      } catch (error) {
+        const err = error as Error;
+        console.error('Scroll error:', err.message);
+        socket.emit('scroll', {
           status: 'error',
-          error: (error as Error).message
-        }));
+          error: err.message
+        });
+        throw error;
       }
-    );
+    });
+  }
+
+  static async handleHover(
+    page: Page,
+    socket: Socket,
+    x: number,
+    y: number
+  ): Promise<void> {
+    await OperationManager.withRetry(async () => {
+      try {
+        await page.mouse.move(x, y);
+        socket.emit('hover', {
+          status: 'success',
+          x,
+          y
+        });
+      } catch (error) {
+        const err = error as Error;
+        console.error('Hover error:', err.message);
+        socket.emit('hover', {
+          status: 'error',
+          error: err.message
+        });
+        throw error;
+      }
+    }, { retries: 1 }); // Single attempt for hover to avoid jerkiness
   }
 
   static async handleType(
     page: Page,
-    ws: WebSocket,
+    socket: Socket,
     text: string
   ): Promise<void> {
-    await OperationManager.safe(
-      async () => {
-        await OperationManager.withTimeout(
-          page.keyboard.type(text),
-          10000,
-          'Type operation timed out'
-        );
-        ws.send(JSON.stringify({
-          type: 'type',
+    await OperationManager.withRetry(async () => {
+      try {
+        await page.keyboard.type(text, { delay: 50 });
+        socket.emit('type', {
           status: 'success',
-          text: text.substring(0, 20) + '...' // Don't echo full text for security
-        }));
-      },
-      undefined,
-      (error: unknown) => {
-        console.error('Type error:', error);
-        ws.send(JSON.stringify({
-          type: 'type',
+          text
+        });
+      } catch (error) {
+        const err = error as Error;
+        console.error('Type error:', err.message);
+        socket.emit('type', {
           status: 'error',
-          error: (error as Error).message
-        }));
+          error: err.message
+        });
+        throw error;
       }
-    );
+    });
   }
 
   static async handleEvaluate(
     page: Page,
-    ws: WebSocket,
+    socket: Socket,
     code: string
   ): Promise<void> {
-    await OperationManager.safe(
-      async () => {
-        const result = await OperationManager.withTimeout(
-          page.evaluate((code) => {
-            try {
-              const fn = new Function(code);
-              return {
-                success: true,
-                result: fn()
-              };
-            } catch (error: any) {
-              return {
-                success: false,
-                error: (error as Error).message
-              };
-            }
-          }, code),
-          15000,
-          'Evaluate operation timed out'
-        );
+    await OperationManager.withRetry(async () => {
+      try {
+        const result = await page.evaluate((codeToEval) => {
+          try {
+            // eslint-disable-next-line no-eval
+            const evalResult = eval(codeToEval);
+            return {
+              success: true,
+              result: JSON.stringify(evalResult, null, 2)
+            };
+          } catch (error) {
+            return {
+              success: false,
+              error: (error as Error).message
+            };
+          }
+        }, code);
         
-        ws.send(JSON.stringify({
-          type: 'evaluate',
-          status: result.success ? 'success' : 'error',
-          result: result.success ? result.result : undefined,
-          error: result.success ? undefined : result.error
-        }));
-      },
-      undefined,
-      (error: unknown) => {
-        console.error('Evaluation error:', error);
-        ws.send(JSON.stringify({
-          type: 'evaluate',
-          status: 'error',
-          error: (error as Error).message
-        }));
+        socket.emit('evaluate', result);
+      } catch (error) {
+        const err = error as Error;
+        console.error('Evaluate error:', err.message);
+        socket.emit('evaluate', {
+          success: false,
+          error: err.message
+        });
+        throw error;
       }
-    );
+    });
   }
 
   static async handleScreenshotAndHtml(
     page: Page,
-    ws: WebSocket
+    socket: Socket
   ): Promise<void> {
-    console.log('Screenshot and HTML requested');
-    
-    await OperationManager.safe(
-      async () => {
-        // Take screenshot
-        const screenshot = await OperationManager.withTimeout(
+    await OperationManager.withRetry(async () => {
+      try {
+        const [screenshot, html] = await Promise.all([
           page.screenshot({ 
             encoding: 'base64',
-            type: 'jpeg',
+            fullPage: false,
             quality: 90,
-            fullPage: true // Full page screenshot
+            type: 'jpeg'
           }),
-          10000,
-          'Screenshot operation timed out'
-        );
+          page.content()
+        ]);
         
-        // Get complete HTML
-        let html = await OperationManager.withTimeout(
-          page.content(),
-          10000,
-          'HTML extraction timed out'
-        );
-        
-        // Remove all SVG elements from HTML
-        html = html.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '');
-        
-        console.log(`Screenshot size: ${screenshot.length}, HTML size: ${html.length}`);
-        
-        ws.send(JSON.stringify({
-          type: 'screenshot_and_html_response',
+        socket.emit('screenshot_and_html', {
           screenshot,
           html
-        }));
-      },
-      undefined,
-      (error: unknown) => {
-        console.error('Screenshot/HTML error:', error);
-        ws.send(JSON.stringify({
-          type: 'screenshot_and_html_response',
-          status: 'error',
-          error: (error as Error).message
-        }));
+        });
+      } catch (error) {
+        const err = error as Error;
+        console.error('Screenshot/HTML error:', err.message);
+        socket.emit('error', {
+          type: 'screenshot',
+          message: err.message
+        });
+        throw error;
       }
-    );
+    });
   }
 
-  static sendError(ws: WebSocket, type: string, error: string): void {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({
-        type,
-        status: 'error',
-        error
-      }));
-    }
-  }
-
-  static sendHeartbeat(ws: WebSocket): void {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'heartbeat',
-        timestamp: Date.now()
-      }));
-    }
+  static sendError(socket: Socket, type: string, message: string): void {
+    socket.emit('error', {
+      type,
+      message
+    });
   }
 }
