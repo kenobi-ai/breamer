@@ -148,9 +148,16 @@ export class ResilientBrowserManager {
       // Override permissions only if they exist
       if (window.navigator.permissions) {
         const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters: any) => (
+        window.navigator.permissions.query = (parameters: any): Promise<PermissionStatus> => (
           parameters.name === 'notifications' ?
-            Promise.resolve({ state: (window as any).Notification?.permission || 'default' }) :
+            Promise.resolve({ 
+              state: (window as any).Notification?.permission || 'default',
+              name: 'notifications' as PermissionName,
+              onchange: null,
+              addEventListener: () => {},
+              removeEventListener: () => {},
+              dispatchEvent: () => false
+            } as PermissionStatus) :
             originalQuery(parameters)
         );
       }

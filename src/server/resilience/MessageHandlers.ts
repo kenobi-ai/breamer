@@ -1,6 +1,6 @@
 import type { Page } from 'puppeteer';
 import type { WebSocket } from 'ws';
-import { OperationManager } from './OperationManager';
+import { OperationManager } from './OperationManager.js';
 
 export class ResilientMessageHandlers {
   static async handleNavigate(
@@ -76,12 +76,12 @@ export class ResilientMessageHandlers {
         }));
       },
       undefined,
-      (error) => {
+      (error: unknown) => {
         console.error('Click error:', error);
         ws.send(JSON.stringify({
           type: 'click',
           status: 'error',
-          error: error.message
+          error: (error as Error).message
         }));
       }
     );
@@ -106,12 +106,12 @@ export class ResilientMessageHandlers {
         }));
       },
       undefined,
-      (error) => {
+      (error: unknown) => {
         console.error('Scroll error:', error);
         ws.send(JSON.stringify({
           type: 'scroll',
           status: 'error',
-          error: error.message
+          error: (error as Error).message
         }));
       }
     );
@@ -136,12 +136,12 @@ export class ResilientMessageHandlers {
         }));
       },
       undefined,
-      (error) => {
+      (error: unknown) => {
         console.error('Type error:', error);
         ws.send(JSON.stringify({
           type: 'type',
           status: 'error',
-          error: error.message
+          error: (error as Error).message
         }));
       }
     );
@@ -165,7 +165,7 @@ export class ResilientMessageHandlers {
             } catch (error: any) {
               return {
                 success: false,
-                error: error.message
+                error: (error as Error).message
               };
             }
           }, code),
@@ -181,12 +181,12 @@ export class ResilientMessageHandlers {
         }));
       },
       undefined,
-      (error) => {
+      (error: unknown) => {
         console.error('Evaluation error:', error);
         ws.send(JSON.stringify({
           type: 'evaluate',
           status: 'error',
-          error: error.message
+          error: (error as Error).message
         }));
       }
     );
@@ -231,12 +231,12 @@ export class ResilientMessageHandlers {
         }));
       },
       undefined,
-      (error) => {
+      (error: unknown) => {
         console.error('Screenshot/HTML error:', error);
         ws.send(JSON.stringify({
           type: 'screenshot_and_html_response',
           status: 'error',
-          error: error.message
+          error: (error as Error).message
         }));
       }
     );

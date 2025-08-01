@@ -1,43 +1,78 @@
 import { WebSocketServer } from 'ws';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import { fileURLToPath } from 'url';
 import express from 'express';
-import { clerkMiddleware, requireAuth } from '@clerk/express';
 import dotenv from 'dotenv';
-import { ResilientBrowserManager } from './resilience/BrowserManager';
-import { ResilientMessageHandlers } from './resilience/MessageHandlers';
-import { OperationManager } from './resilience/OperationManager';
+import { ResilientBrowserManager } from './resilience/BrowserManager.js';
+import { ResilientMessageHandlers } from './resilience/MessageHandlers.js';
+import { OperationManager } from './resilience/OperationManager.js';
 
 dotenv.config();
 
 const port = parseInt(process.env.PORT || '8080', 10);
 const host = '0.0.0.0';
 
-// Get directory path for ES modules
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
+// Allowed origins configuration
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'https://localhost:3000',
+  /^https:\/\/.*\.kenobi\.ai$/  // Regex for any subdomain of kenobi.ai
+];
+
+// Origin validation helper
+const isOriginAllowed = (origin: string | undefined): boolean => {
+  if (!origin) return false;
+  
+  return ALLOWED_ORIGINS.some(allowedOrigin => {
+    if (allowedOrigin instanceof RegExp) {
+      return allowedOrigin.test(origin);
+    }
+    return allowedOrigin === origin;
+  });
+};
 
 // Create Express app
 const app = express();
 
-// Apply Clerk middleware to all routes
-// app.use(clerkMiddleware());
-
-// Serve static files from dist directory
-// app.use('/assets', express.static(join(__dirname, 'assets')));
-
-
-
-// Protect main route with Clerk authentication
-app.get('/', requireAuth(), (req, res) => {
-  try {
-    const html = readFileSync(join(__dirname, 'index.html'), 'utf-8');
-    res.setHeader('Content-Type', 'text/html');
-    res.send(html);
-  } catch (err) {
-    console.error('Error serving index.html:', err);
-    res.status(404).send('Not found');
+// CORS and origin protection middleware
+app.use((req, res, next) => {
+  // Skip origin check for health endpoint
+  if (req.path === '/health') {
+    next();
+    return;
   }
+  
+  const origin = req.headers.origin;
+  
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    if (origin && isOriginAllowed(origin)) {
+      res.sendStatus(200);
+    } else {
+      res.sendStatus(403);
+    }
+    return;
+  }
+  
+  // Block requests from disallowed origins
+  if (origin && !isOriginAllowed(origin)) {
+    console.log(`Blocked request from unauthorized origin: ${origin}`);
+    res.status(403).json({ error: 'Origin not allowed' });
+    return;
+  }
+  
+  next();
+});
+
+// Simple root route - just return a smiley face
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send('😊');
 });
 
 // Create HTTP server from Express app
@@ -62,19 +97,25 @@ const wss = new WebSocketServer({
   server,
   perMessageDeflate: false, // Disable compression to reduce CPU load
   maxPayload: 10 * 1024 * 1024, // 10MB max payload
-  verifyClient: (info) => {
-    // Allow connections from localhost during development
+  verifyClient: (info: { origin?: string; req: { headers: { origin?: string } } }) => {
     const origin = info.origin || info.req.headers.origin;
     console.log('WebSocket verify client from origin:', origin);
     
-    // In production, you'd want to check against allowed origins
-    // For now, allow localhost connections
-    if (origin && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+    // Check if origin is allowed
+    if (origin && isOriginAllowed(origin)) {
+      console.log('WebSocket connection allowed from:', origin);
       return true;
     }
     
-    // Allow if no origin (e.g., direct WebSocket connections)
-    return !origin;
+    // Block connections from disallowed origins
+    if (origin) {
+      console.log('WebSocket connection blocked from unauthorized origin:', origin);
+      return false;
+    }
+    
+    // Block connections without origin header for security
+    console.log('WebSocket connection blocked: no origin header');
+    return false;
   }
 });
 
@@ -91,16 +132,16 @@ wss.on('connection', async (ws, req) => {
 
   try {
     // Extract auth token
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
-    const token = url.searchParams.get('token') || req.headers.authorization?.replace('Bearer ', '');
+    // const url = new URL(req.url || '', `http://${req.headers.host}`);
+    // const token = url.searchParams.get('token') || req.headers.authorization?.replace('Bearer ', '');
     
-    console.log('Token received:', token ? 'Yes' : 'No');
+    // console.log('Token received:', token ? 'Yes' : 'No');
     
-    if (!token) {
-      ResilientMessageHandlers.sendError(ws, 'auth', 'Authentication required');
-      ws.close();
-      return;
-    }
+    // if (!token) {
+    //   ResilientMessageHandlers.sendError(ws, 'auth', 'Authentication required');
+    //   ws.close();
+    //   return;
+    // }
 
     // TODO: Implement proper Clerk token verification
     isAuthenticated = true;
@@ -155,7 +196,7 @@ wss.on('connection', async (ws, req) => {
     await browserManager.initializeScreencast(session.cdpSession);
 
     // Set up resilient screencast frame handler
-    session.cdpSession.on('Page.screencastFrame', async (frame) => {
+    session.cdpSession.on('Page.screencastFrame', async (frame: { sessionId: number; data?: string }) => {
       try {
         const frameSize = frame.data?.length || 0;
         console.log('Received frame:', frame.sessionId, 'data length:', frameSize);
@@ -173,7 +214,7 @@ wss.on('connection', async (ws, req) => {
             frameQueue.shift();
           }
           
-          frameQueue.push({ data: frame.data, sessionId: frame.sessionId });
+          frameQueue.push({ data: frame.data, sessionId: String(frame.sessionId) });
           processFrameQueue();
         } else {
           console.warn('WebSocket not open, skipping frame');
@@ -182,12 +223,12 @@ wss.on('connection', async (ws, req) => {
         // Always acknowledge the frame to prevent backpressure
         try {
           await session.cdpSession.send('Page.screencastFrameAck', {
-            sessionId: frame.sessionId
+            sessionId: Number(frame.sessionId)
           });
         } catch (ackError) {
           console.error('Frame ack error:', ackError);
           // If we can't ack frames, the session is likely broken
-          if (ackError.message?.includes('Session closed') || ackError.message?.includes('Target closed')) {
+          if ((ackError as Error).message?.includes('Session closed') || (ackError as Error).message?.includes('Target closed')) {
             console.error(`CDP session appears broken for client ${clientId}, marking for recovery`);
             const currentSession = await browserManager.getSession(clientId);
             if (currentSession) {
@@ -327,7 +368,7 @@ wss.on('connection', async (ws, req) => {
           await browserManager.cleanupSession(clientId);
         },
         undefined,
-        (error) => console.error(`Cleanup error for ${clientId}:`, error)
+        (error: unknown) => console.error(`Cleanup error for ${clientId}:`, error)
       );
     });
 

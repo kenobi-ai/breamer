@@ -4,9 +4,13 @@
 #
 
 app = 'breamer'
-primary_region = 'lhr'
+primary_region = 'ord'
 
 [build]
+  # List secrets that should be available during build
+  # Example: [build.args]
+  #   NPM_TOKEN = "NPM_TOKEN"
+  #   PRIVATE_KEY = "PRIVATE_KEY"
 
 [[services]]
   internal_port = 3003

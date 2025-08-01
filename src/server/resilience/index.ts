@@ -1,3 +1,3 @@
-export { ResilientBrowserManager } from './BrowserManager';
-export { ResilientMessageHandlers } from './MessageHandlers';
-export { OperationManager } from './OperationManager';
+export { ResilientBrowserManager } from './BrowserManager.js';
+export { ResilientMessageHandlers } from './MessageHandlers.js';
+export { OperationManager } from './OperationManager.js';
