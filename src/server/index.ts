@@ -21,10 +21,12 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const app = express();
 
 // Apply Clerk middleware to all routes
-app.use(clerkMiddleware());
+// app.use(clerkMiddleware());
 
 // Serve static files from dist directory
-app.use('/assets', express.static(join(__dirname, 'assets')));
+// app.use('/assets', express.static(join(__dirname, 'assets')));
+
+
 
 // Protect main route with Clerk authentication
 app.get('/', requireAuth(), (req, res) => {

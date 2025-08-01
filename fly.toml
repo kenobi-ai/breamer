@@ -24,6 +24,6 @@ primary_region = 'lhr'
     handlers = ["http", "tls"]
 
 [[vm]]
-  memory = '8gb'
+  memory = '32gb'
   cpu_kind = 'performance'
-  cpus = 2
+  cpus = 4
