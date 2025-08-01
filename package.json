@@ -4,14 +4,11 @@
   "description": "High-fidelity, low-latency browser streaming service",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"pnpm run dev:server\" \"pnpm run dev:client\"",
+    "dev": "concurrently \"pnpm run dev:server\"",
     "dev:server": "tsx watch src/server/index.ts",
-    "dev:client": "vite",
-    "build": "pnpm run build:server && pnpm run build:client",
+    "build": "pnpm run build:server",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "vite build",
-    "start": "node dist/index.js",
-    "preview": "vite preview"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.36.0",
