@@ -20,11 +20,14 @@ const io = new Server(httpServer, {
   pingTimeout: 300000,  // 5 minutes
   // Prefer WebSocket for better performance
   transports: ['websocket', 'polling'],
-  // Connection state recovery
+  // Disable connection state recovery to avoid session ID issues
   connectionStateRecovery: {
-    maxDisconnectionDuration: 120000, // 2 minutes
+    maxDisconnectionDuration: 0, // Disable recovery
     skipMiddlewares: true
-  }
+  },
+  // Allow unlimited connections
+  maxHttpBufferSize: 1e8, // 100 MB
+  allowEIO3: true // Allow older clients
 });
 
 // Simple health check endpoint
@@ -39,11 +42,17 @@ const browserManager = new ResilientBrowserManager({
   maxHealthCheckFailures: 5    // More tolerance for failures
 });
 
-// Debug Socket.io
+// Debug Socket.io - only log non-session errors
 io.engine.on('connection_error', (err: any) => {
-  console.log('[Socket.io] Connection error:', err.req);
+  // Skip logging "Session ID unknown" errors as they're expected when clients reconnect
+  if (err.message === 'Session ID unknown') {
+    return;
+  }
+  console.log('[Socket.io] Connection error from:', err.req?.url || 'unknown');
   console.log('[Socket.io] Error type:', err.type);
   console.log('[Socket.io] Error message:', err.message);
+  console.log('[Socket.io] Error code:', err.code);
+  console.log('[Socket.io] Request headers:', err.req?.headers?.['user-agent']);
 });
 
 // Additional debugging
@@ -59,6 +68,7 @@ io.engine.on('headers', (headers: any, req: any) => {
 io.on('connection', (socket) => {
   const clientId = socket.id;
   console.log(`[Socket.io] Client connected: ${clientId} (Active: ${io.engine.clientsCount})`);
+  console.log(`[Sessions] Current browser sessions: ${Array.from(browserManager.getSessions().keys()).join(', ')}`);
   
   // Send immediate acknowledgment
   socket.emit('connected', { clientId });
@@ -66,6 +76,14 @@ io.on('connection', (socket) => {
   // Initialize browser session asynchronously
   setTimeout(async () => {
     try {
+      // Check if session already exists (in case of quick reconnects)
+      const existingSession = await browserManager.getSession(clientId);
+      if (existingSession) {
+        console.log(`[Socket.io] Reusing existing browser session for ${clientId}`);
+        socket.emit('session_ready', { message: 'Browser session is ready' });
+        return;
+      }
+
       console.log(`[Socket.io] Creating browser session for ${clientId}...`);
       const session = await browserManager.createSession(clientId);
       if (!session) {
@@ -171,9 +189,11 @@ io.on('connection', (socket) => {
   });
 
   // Handle disconnection
-  socket.on('disconnect', async () => {
-    console.log(`Client disconnected: ${clientId} (Active: ${io.engine.clientsCount - 1})`);
+  socket.on('disconnect', async (reason) => {
+    console.log(`[Socket.io] Client disconnected: ${clientId}, reason: ${reason} (Active: ${io.engine.clientsCount - 1})`);
+    console.log(`[Sessions] Cleaning up browser session for ${clientId}`);
     await browserManager.cleanupSession(clientId);
+    console.log(`[Sessions] Remaining browser sessions: ${Array.from(browserManager.getSessions().keys()).join(', ')}`);
   });
 
   // Handle errors
@@ -202,7 +222,7 @@ process.on('SIGTERM', async () => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3003;
 const HOST = '0.0.0.0'; // Listen on all interfaces
 httpServer.listen(PORT, HOST, () => {
   console.log(`🚀 Breamer server running on ${HOST}:${PORT}`);

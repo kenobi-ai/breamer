@@ -30,8 +30,8 @@ export class ResilientBrowserManager {
       maxHealthCheckFailures: options.maxHealthCheckFailures ?? 5
     };
 
-    // Global cleanup interval - less aggressive
-    setInterval(() => this.cleanupStaleSessions(), 300000); // 5 minutes
+    // Global cleanup interval - more aggressive
+    setInterval(() => this.cleanupStaleSessions(), 60000); // 1 minute
   }
 
   async createSession(clientId: string): Promise<ClientSession> {
@@ -298,53 +298,75 @@ export class ResilientBrowserManager {
     return session;
   }
 
+  getSessions(): Map<string, ClientSession> {
+    return this.sessions;
+  }
+
   async cleanupSession(clientId: string, removeFromMap = true): Promise<void> {
     const session = this.sessions.get(clientId);
-    if (!session) return;
+    if (!session) {
+      console.log(`[Cleanup] No session found for ${clientId}`);
+      return;
+    }
+
+    console.log(`[Cleanup] Starting cleanup for session ${clientId}`);
 
     // Stop health monitoring
     const interval = this.healthCheckIntervals.get(clientId);
     if (interval) {
       clearInterval(interval);
       this.healthCheckIntervals.delete(clientId);
+      console.log(`[Cleanup] Stopped health monitoring for ${clientId}`);
     }
 
     // Clean up resources with error handling
     try {
       if (session.cdpSession) {
         await session.cdpSession.send('Page.stopScreencast').catch(() => {});
+        console.log(`[Cleanup] Stopped screencast for ${clientId}`);
       }
     } catch (error) {
-      console.error('Error stopping screencast:', error);
+      console.error(`[Cleanup] Error stopping screencast for ${clientId}:`, error);
     }
 
     try {
       if (session.page && !session.page.isClosed()) {
         await session.page.close();
+        console.log(`[Cleanup] Closed page for ${clientId}`);
       }
     } catch (error) {
-      console.error('Error closing page:', error);
+      console.error(`[Cleanup] Error closing page for ${clientId}:`, error);
     }
 
     try {
       if (session.browser && session.browser.isConnected()) {
         await session.browser.close();
+        console.log(`[Cleanup] Closed browser for ${clientId}`);
       }
     } catch (error) {
-      console.error('Error closing browser:', error);
+      console.error(`[Cleanup] Error closing browser for ${clientId}:`, error);
     }
 
     if (removeFromMap) {
       this.sessions.delete(clientId);
+      console.log(`[Cleanup] Removed session ${clientId} from map. Total sessions: ${this.sessions.size}`);
     }
   }
 
   private async cleanupStaleSessions(): Promise<void> {
     const now = Date.now();
+    const staleCount = Array.from(this.sessions.entries()).filter(
+      ([_, session]) => now - session.lastActivity > this.options.sessionTimeout
+    ).length;
+    
+    if (staleCount > 0) {
+      console.log(`[Cleanup] Found ${staleCount} stale sessions out of ${this.sessions.size} total`);
+    }
     
     for (const [clientId, session] of this.sessions.entries()) {
       if (now - session.lastActivity > this.options.sessionTimeout) {
-        console.log(`Cleaning up stale session: ${clientId}`);
+        const idleTime = Math.floor((now - session.lastActivity) / 1000);
+        console.log(`[Cleanup] Cleaning up stale session: ${clientId} (idle for ${idleTime}s)`);
         await this.cleanupSession(clientId);
       }
     }
