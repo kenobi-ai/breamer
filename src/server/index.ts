@@ -1,10 +1,16 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { ResilientBrowserManager } from './resilience/BrowserManager.js';
 import { ResilientMessageHandlers } from './resilience/MessageHandlers.js';
 
+console.log("Env slice::", JSON.stringify({
+  PORT: process.env.PORT ?? 'not set',
+}, null, 2));
+
 const app = express();
+app.use(express.json()); // Add JSON body parser
 const httpServer = createServer(app);
 
 // Configure Socket.io with CORS
@@ -34,6 +40,7 @@ const io = new Server(httpServer, {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'breamer', socketio: 'enabled' });
 });
+
 
 // Initialize browser manager with long-lived connection settings
 const browserManager = new ResilientBrowserManager({
