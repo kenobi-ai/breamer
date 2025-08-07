@@ -163,7 +163,7 @@ export class ResilientBrowserManager {
       }
     });
 
-    await page.setViewport({ width: 1280, height: 1280 });
+    await page.setViewport({ width: 1440, height: 1880 });
     
     // Set reasonable timeouts
     page.setDefaultTimeout(30000);
@@ -181,9 +181,9 @@ export class ResilientBrowserManager {
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 60, // Reduced from 80 to reduce frame size
-      maxWidth: 1280,
-      maxHeight: 1280,
-      everyNthFrame: 2 // Only capture every 2nd frame to reduce load
+      maxWidth: 1440,
+      maxHeight: 1880,
+      everyNthFrame: 1 // Only capture every 2nd frame to reduce load
     });
     console.log('Screencast started');
   }
