@@ -133,66 +133,101 @@ io.on('connection', (socket) => {
 
   // Message handlers
   socket.on('navigate', async (data) => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'navigate', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'navigate', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleNavigate(session.page, socket, data.url);
+    } catch (error) {
+      console.error('Unhandled navigate error:', error);
+      socket.emit('error', { type: 'navigate', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleNavigate(session.page, socket, data.url);
   });
 
   socket.on('click', async (data) => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'click', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'click', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleClick(session.page, socket, data.x, data.y);
+    } catch (error) {
+      console.error('Unhandled click error:', error);
+      socket.emit('error', { type: 'click', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleClick(session.page, socket, data.x, data.y);
   });
 
   socket.on('scroll', async (data) => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'scroll', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'scroll', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleScroll(session.page, socket, data.deltaY);
+    } catch (error) {
+      console.error('Unhandled scroll error:', error);
+      socket.emit('error', { type: 'scroll', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleScroll(session.page, socket, data.deltaY);
   });
 
   socket.on('hover', async (data) => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'hover', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'hover', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleHover(session.page, socket, data.x, data.y);
+    } catch (error) {
+      console.error('Unhandled hover error:', error);
+      socket.emit('error', { type: 'hover', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleHover(session.page, socket, data.x, data.y);
   });
 
   socket.on('type', async (data) => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'type', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'type', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleType(session.page, socket, data.text);
+    } catch (error) {
+      console.error('Unhandled type error:', error);
+      socket.emit('error', { type: 'type', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleType(session.page, socket, data.text);
   });
 
   socket.on('evaluate', async (data) => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'evaluate', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'evaluate', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleEvaluate(session.page, socket, data.code);
+    } catch (error) {
+      console.error('Unhandled evaluate error:', error);
+      socket.emit('error', { type: 'evaluate', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleEvaluate(session.page, socket, data.code);
   });
 
   socket.on('request_screenshot_and_html', async () => {
-    const session = await browserManager.getSession(clientId);
-    if (!session) {
-      socket.emit('error', { type: 'screenshot', message: 'Session not available' });
-      return;
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'screenshot', message: 'Session not available' });
+        return;
+      }
+      await ResilientMessageHandlers.handleScreenshotAndHtml(session.page, socket);
+    } catch (error) {
+      console.error('Unhandled screenshot error:', error);
+      socket.emit('error', { type: 'screenshot', message: 'Internal server error', recoverable: true });
     }
-    await ResilientMessageHandlers.handleScreenshotAndHtml(session.page, socket);
   });
 
   // Handle disconnection

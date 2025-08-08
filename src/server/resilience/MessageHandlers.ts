@@ -1,8 +1,10 @@
 import type { Page } from 'puppeteer';
 import type { Socket } from 'socket.io';
 import { OperationManager } from './OperationManager.js';
+import { getConfig } from './config.js';
 
 export class ResilientMessageHandlers {
+  private static config = getConfig();
   static async handleNavigate(
     page: Page,
     socket: Socket,
@@ -10,8 +12,8 @@ export class ResilientMessageHandlers {
   ): Promise<void> {
     console.log('Navigation requested to:', url);
     
-    await OperationManager.withRetry(async () => {
-      try {
+    try {
+      await OperationManager.withRetry(async () => {
         const targetUrl = url.startsWith('http') ? url : `https://${url}`;
         console.log('Navigating to full URL:', targetUrl);
         
@@ -20,9 +22,9 @@ export class ResilientMessageHandlers {
           await OperationManager.withTimeout(
             page.goto(targetUrl, {
               waitUntil: 'networkidle0',
-              timeout: 30000
+              timeout: this.config.navigation.primaryTimeout
             }),
-            35000,
+            this.config.navigation.pageTimeout,
             `Navigation to ${targetUrl} timed out`
           );
         } catch (firstError) {
@@ -30,9 +32,9 @@ export class ResilientMessageHandlers {
           await OperationManager.withTimeout(
             page.goto(targetUrl, {
               waitUntil: 'domcontentloaded',
-              timeout: 30000
+              timeout: this.config.navigation.fallbackTimeout
             }),
-            35000,
+            this.config.navigation.fallbackTimeout + 5000,
             `Alternative navigation to ${targetUrl} timed out`
           );
         }
@@ -41,16 +43,29 @@ export class ResilientMessageHandlers {
           status: 'success',
           url: targetUrl
         });
-      } catch (error) {
-        const err = error as Error;
-        console.error('Navigation error:', err.message);
-        socket.emit('navigation', {
-          status: 'error',
-          error: err.message
-        });
-        throw error;
+      }, {
+        retries: this.config.navigation.retries,
+        timeout: this.config.navigation.pageTimeout + 5000,
+        backoff: this.config.navigation.backoff
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('Navigation failed after all retries:', err.message);
+      
+      // Send error to client but don't crash the server
+      socket.emit('navigation', {
+        status: 'error',
+        error: err.message,
+        recoverable: true
+      });
+      
+      // Try to recover the page state
+      try {
+        await page.goto('about:blank', { timeout: 5000 });
+      } catch (recoveryError) {
+        console.error('Failed to reset page:', recoveryError);
       }
-    });
+    }
   }
 
   static async handleClick(
@@ -59,24 +74,28 @@ export class ResilientMessageHandlers {
     x: number,
     y: number
   ): Promise<void> {
-    await OperationManager.withRetry(async () => {
-      try {
+    try {
+      await OperationManager.withRetry(async () => {
         await page.mouse.click(x, y);
         socket.emit('click', {
           status: 'success',
           x,
           y
         });
-      } catch (error) {
-        const err = error as Error;
-        console.error('Click error:', err.message);
-        socket.emit('click', {
-          status: 'error',
-          error: err.message
-        });
-        throw error;
-      }
-    });
+      }, { 
+        retries: this.config.operations.defaultRetries, 
+        timeout: 5000,
+        backoff: this.config.operations.defaultBackoff
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('Click failed after retries:', err.message);
+      socket.emit('click', {
+        status: 'error',
+        error: err.message,
+        recoverable: true
+      });
+    }
   }
 
   static async handleScroll(
@@ -84,8 +103,8 @@ export class ResilientMessageHandlers {
     socket: Socket,
     deltaY: number
   ): Promise<void> {
-    await OperationManager.withRetry(async () => {
-      try {
+    try {
+      await OperationManager.withRetry(async () => {
         await page.evaluate((scrollAmount) => {
           window.scrollBy(0, scrollAmount);
         }, deltaY);
@@ -94,16 +113,20 @@ export class ResilientMessageHandlers {
           status: 'success',
           deltaY
         });
-      } catch (error) {
-        const err = error as Error;
-        console.error('Scroll error:', err.message);
-        socket.emit('scroll', {
-          status: 'error',
-          error: err.message
-        });
-        throw error;
-      }
-    });
+      }, { 
+        retries: this.config.operations.defaultRetries, 
+        timeout: 5000,
+        backoff: this.config.operations.defaultBackoff
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('Scroll failed after retries:', err.message);
+      socket.emit('scroll', {
+        status: 'error',
+        error: err.message,
+        recoverable: true
+      });
+    }
   }
 
   static async handleHover(
@@ -137,23 +160,27 @@ export class ResilientMessageHandlers {
     socket: Socket,
     text: string
   ): Promise<void> {
-    await OperationManager.withRetry(async () => {
-      try {
+    try {
+      await OperationManager.withRetry(async () => {
         await page.keyboard.type(text, { delay: 50 });
         socket.emit('type', {
           status: 'success',
           text
         });
-      } catch (error) {
-        const err = error as Error;
-        console.error('Type error:', err.message);
-        socket.emit('type', {
-          status: 'error',
-          error: err.message
-        });
-        throw error;
-      }
-    });
+      }, { 
+        retries: this.config.operations.defaultRetries, 
+        timeout: this.config.operations.defaultTimeout,
+        backoff: this.config.operations.defaultBackoff
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('Type failed after retries:', err.message);
+      socket.emit('type', {
+        status: 'error',
+        error: err.message,
+        recoverable: true
+      });
+    }
   }
 
   static async handleEvaluate(
@@ -161,8 +188,8 @@ export class ResilientMessageHandlers {
     socket: Socket,
     code: string
   ): Promise<void> {
-    await OperationManager.withRetry(async () => {
-      try {
+    try {
+      await OperationManager.withRetry(async () => {
         const result = await page.evaluate((codeToEval) => {
           try {
             // eslint-disable-next-line no-eval
@@ -180,24 +207,28 @@ export class ResilientMessageHandlers {
         }, code);
         
         socket.emit('evaluate', result);
-      } catch (error) {
-        const err = error as Error;
-        console.error('Evaluate error:', err.message);
-        socket.emit('evaluate', {
-          success: false,
-          error: err.message
-        });
-        throw error;
-      }
-    });
+      }, { 
+        retries: this.config.operations.defaultRetries, 
+        timeout: this.config.operations.defaultTimeout,
+        backoff: this.config.operations.defaultBackoff
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('Evaluate failed after retries:', err.message);
+      socket.emit('evaluate', {
+        success: false,
+        error: err.message,
+        recoverable: true
+      });
+    }
   }
 
   static async handleScreenshotAndHtml(
     page: Page,
     socket: Socket
   ): Promise<void> {
-    await OperationManager.withRetry(async () => {
-      try {
+    try {
+      await OperationManager.withRetry(async () => {
         const [screenshot, html] = await Promise.all([
           page.screenshot({ 
             encoding: 'base64',
@@ -212,16 +243,20 @@ export class ResilientMessageHandlers {
           screenshot,
           html
         });
-      } catch (error) {
-        const err = error as Error;
-        console.error('Screenshot/HTML error:', err.message);
-        socket.emit('error', {
-          type: 'screenshot',
-          message: err.message
-        });
-        throw error;
-      }
-    });
+      }, { 
+        retries: this.config.operations.defaultRetries, 
+        timeout: 15000,
+        backoff: this.config.operations.defaultBackoff
+      });
+    } catch (error) {
+      const err = error as Error;
+      console.error('Screenshot/HTML failed after retries:', err.message);
+      socket.emit('error', {
+        type: 'screenshot',
+        message: err.message,
+        recoverable: true
+      });
+    }
   }
 
   static sendError(socket: Socket, type: string, message: string): void {
