@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { ResilientBrowserManager } from './resilience/BrowserManager.js';
 import { ResilientMessageHandlers } from './resilience/MessageHandlers.js';
+import { MemoryManager } from './resilience/MemoryManager.js';
 
 console.log("Env slice::", JSON.stringify({
   PORT: process.env.PORT ?? 'not set',
@@ -42,12 +43,18 @@ app.get('/health', (req, res) => {
 });
 
 
+// Initialize memory manager
+const memoryManager = MemoryManager.getInstance();
+
 // Initialize browser manager with long-lived connection settings
 const browserManager = new ResilientBrowserManager({
   healthCheckInterval: 60000,  // 60 seconds
   sessionTimeout: 1800000,     // 30 minutes
   maxHealthCheckFailures: 5    // More tolerance for failures
 });
+
+// Make browserManager globally available for memory manager
+(global as any).browserManager = browserManager;
 
 // Debug Socket.io - only log non-session errors
 io.engine.on('connection_error', (err: any) => {
@@ -105,20 +112,33 @@ io.on('connection', (socket) => {
       
       socket.emit('session_ready', { message: 'Browser session is ready' });
 
-      // Set up screencast frame handler
+      // Set up screencast frame handler with memory management
       session.cdpSession.on('Page.screencastFrame', async (frame: any) => {
         try {
+          // Check memory before processing frame
+          const stats = memoryManager.getMemoryStats();
+          if (stats.heapUsedPercent > 90) {
+            console.warn('[Screencast] Skipping frame due to high memory usage');
+            // Still acknowledge but don't send
+            await session.cdpSession.send('Page.screencastFrameAck', {
+              sessionId: Number(frame.sessionId)
+            }).catch(() => {});
+            return;
+          }
+          
           // Send frame to client
           socket.emit('frame', {
             data: frame.data,
             sessionId: String(frame.sessionId)
           });
 
-          // Acknowledge frame
-          await session.cdpSession.send('Page.screencastFrameAck', {
-            sessionId: Number(frame.sessionId)
-          }).catch((error) => {
-            console.error('Frame ack error:', error);
+          // Acknowledge frame immediately to prevent buffering
+          setImmediate(async () => {
+            await session.cdpSession.send('Page.screencastFrameAck', {
+              sessionId: Number(frame.sessionId)
+            }).catch((error) => {
+              console.error('Frame ack error:', error);
+            });
           });
         } catch (error) {
           console.error('Error in screencast frame handler:', error);
@@ -234,6 +254,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async (reason) => {
     console.log(`[Socket.io] Client disconnected: ${clientId}, reason: ${reason} (Active: ${io.engine.clientsCount - 1})`);
     console.log(`[Sessions] Cleaning up browser session for ${clientId}`);
+    
+    // Clear frame buffers for this client
+    memoryManager.clearClientFrames(clientId);
+    
     await browserManager.cleanupSession(clientId);
     console.log(`[Sessions] Remaining browser sessions: ${Array.from(browserManager.getSessions().keys()).join(', ')}`);
   });
@@ -254,13 +278,38 @@ process.on('SIGINT', async () => {
   });
 });
 
-process.on('SIGTERM', async () => {
-  console.log('\nShutting down gracefully...');
+// Graceful shutdown handlers
+const shutdown = async (signal: string) => {
+  console.log(`\n${signal} received, shutting down gracefully...`);
+  
+  // Stop accepting new connections
+  httpServer.close();
+  
+  // Clean up memory manager
+  memoryManager.shutdown();
+  
+  // Clean up all browser sessions
   await browserManager.cleanupAll();
+  
+  // Close socket.io
   io.close(() => {
     console.log('Socket.io server closed');
     process.exit(0);
   });
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit - try to recover
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit - try to recover
 });
 
 // Start server

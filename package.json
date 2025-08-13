@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"pnpm run dev:server\"",
-    "dev:server": "tsx watch src/server/index.ts",
+    "dev:server": "tsx watch --expose-gc --max-old-space-size=2048 src/server/index.ts",
     "build": "pnpm run build:server",
     "build:server": "tsc -p tsconfig.server.json",
-    "start": "node dist/index.js"
+    "start": "node --expose-gc --max-old-space-size=2048 dist/index.js"
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.36.0",

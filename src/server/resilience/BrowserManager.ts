@@ -89,9 +89,17 @@ export class ResilientBrowserManager {
         '--disable-site-isolation-trials',
         '--disable-blink-features=AutomationControlled',
         '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--max-old-space-size=2048', // Increased memory limit to 2GB
+        '--max-old-space-size=1536', // Limit Chrome's memory to 1.5GB
         '--disable-gpu-sandbox',
-        '--disable-software-rasterizer'
+        '--disable-software-rasterizer',
+        '--memory-pressure-off',
+        '--max_old_space_size=1536',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--js-flags=--expose-gc --max-old-space-size=1536'
       ],
       handleSIGINT: false,
       handleSIGTERM: false,
@@ -180,10 +188,10 @@ export class ResilientBrowserManager {
     
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: 60, // Reduced from 80 to reduce frame size
-      maxWidth: 1440,
-      maxHeight: 1880,
-      everyNthFrame: 1 // Only capture every 2nd frame to reduce load
+      quality: 50, // Further reduced quality
+      maxWidth: 1280, // Reduced resolution
+      maxHeight: 1024,
+      everyNthFrame: 2 // Skip every other frame
     });
     console.log('Screencast started');
   }
