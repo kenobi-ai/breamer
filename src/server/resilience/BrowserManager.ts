@@ -34,14 +34,14 @@ export class ResilientBrowserManager {
     setInterval(() => this.cleanupStaleSessions(), 60000); // 1 minute
   }
 
-  async createSession(clientId: string): Promise<ClientSession> {
+  async createSession(clientId: string, viewportWidth = 1440, viewportHeight = 1880): Promise<ClientSession> {
     let retries = 0;
     let lastError: Error | null = null;
 
     while (retries < this.options.maxRetries) {
       try {
         const browser = await this.launchBrowser();
-        const page = await this.createPage(browser);
+        const page = await this.createPage(browser, viewportWidth, viewportHeight);
         
         // Navigate to black page BEFORE creating CDP session
         await page.goto('data:text/html,<html><body style="background:#000;margin:0;padding:0;height:100vh;"></body></html>');
@@ -133,7 +133,7 @@ export class ResilientBrowserManager {
     return browser;
   }
 
-  private async createPage(browser: Browser): Promise<Page> {
+  private async createPage(browser: Browser, viewportWidth = 1440, viewportHeight = 1880): Promise<Page> {
     const page = await browser.newPage();
 
     // Page crash handler
@@ -171,7 +171,7 @@ export class ResilientBrowserManager {
       }
     });
 
-    await page.setViewport({ width: 1440, height: 1880 });
+    await page.setViewport({ width: viewportWidth, height: viewportHeight });
     
     // Set reasonable timeouts
     page.setDefaultTimeout(30000);
@@ -180,8 +180,8 @@ export class ResilientBrowserManager {
     return page;
   }
 
-  async initializeScreencast(cdpSession: CDPSession): Promise<void> {
-    console.log('Starting screencast...');
+  async initializeScreencast(cdpSession: CDPSession, maxWidth = 1280, maxHeight = 1024): Promise<void> {
+    console.log(`Starting screencast with dimensions ${maxWidth}x${maxHeight}...`);
     
     // Enable page first
     await cdpSession.send('Page.enable');
@@ -189,8 +189,8 @@ export class ResilientBrowserManager {
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 50, // Further reduced quality
-      maxWidth: 1280, // Reduced resolution
-      maxHeight: 1024,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
       everyNthFrame: 2 // Skip every other frame
     });
     console.log('Screencast started');
@@ -396,6 +396,29 @@ export class ResilientBrowserManager {
     
     await Promise.allSettled(cleanupPromises);
     this.sessions.clear();
+  }
+
+  async updateViewport(clientId: string, width: number, height: number): Promise<void> {
+    const session = this.sessions.get(clientId);
+    if (!session) {
+      throw new Error(`Session not found for client ${clientId}`);
+    }
+
+    try {
+      // Update the page viewport
+      await session.page.setViewport({ width, height });
+      console.log(`[Viewport] Updated page viewport for ${clientId} to ${width}x${height}`);
+
+      // Stop current screencast
+      await session.cdpSession.send('Page.stopScreencast').catch(() => {});
+      
+      // Restart screencast with new dimensions
+      await this.initializeScreencast(session.cdpSession, width, height);
+      console.log(`[Viewport] Restarted screencast for ${clientId} with new dimensions`);
+    } catch (error) {
+      console.error(`[Viewport] Failed to update viewport for ${clientId}:`, error);
+      throw error;
+    }
   }
 
   private delay(ms: number): Promise<void> {

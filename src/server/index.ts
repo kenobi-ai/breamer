@@ -107,8 +107,8 @@ io.on('connection', (socket) => {
 
       console.log(`[Socket.io] Browser session created for ${clientId}`);
       
-      // Initialize screencast BEFORE setting up handlers
-      await browserManager.initializeScreencast(session.cdpSession);
+      // Initialize screencast BEFORE setting up handlers (default to 1440x1880 viewport)
+      await browserManager.initializeScreencast(session.cdpSession, 1440, 1880);
       
       socket.emit('session_ready', { message: 'Browser session is ready' });
 
@@ -247,6 +247,22 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Unhandled screenshot error:', error);
       socket.emit('error', { type: 'screenshot', message: 'Internal server error', recoverable: true });
+    }
+  });
+
+  socket.on('set_viewport', async (data) => {
+    try {
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit('error', { type: 'set_viewport', message: 'Session not available' });
+        return;
+      }
+      console.log(`[Viewport] Setting viewport for ${clientId} to ${data.width}x${data.height}`);
+      await browserManager.updateViewport(clientId, data.width, data.height);
+      socket.emit('viewport_updated', { width: data.width, height: data.height });
+    } catch (error) {
+      console.error('Unhandled set_viewport error:', error);
+      socket.emit('error', { type: 'set_viewport', message: 'Internal server error', recoverable: true });
     }
   });
 
