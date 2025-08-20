@@ -1,7 +1,7 @@
 > Btw -- pretty much all of this repo was written by an LLM
 > Here be 🐉s!!!
 
-# Breamer - High-Fidelity Browser Streaming
+# BreamerVision™ - High-Fidelity Browser Streaming
 
 Experimental browser streaming service using Puppeteer's CDP Screencast API.
 
