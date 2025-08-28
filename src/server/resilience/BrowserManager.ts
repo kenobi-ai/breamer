@@ -76,67 +76,40 @@ export class ResilientBrowserManager {
   }
 
   private async launchBrowser(): Promise<Browser> {
-    // const browser = await puppeteer.launch({
-    //   headless: true,
-    //   executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    //   args: [
-    //     '--enable-gpu',
-    //     '--disable-dev-shm-usage',
-    //     '--no-sandbox',
-    //     '--disable-setuid-sandbox',
-    //     '--disable-web-security',
-    //     '--disable-features=IsolateOrigins',
-    //     '--disable-site-isolation-trials',
-    //     '--disable-blink-features=AutomationControlled',
-    //     '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    //     '--max-old-space-size=1536', // Limit Chrome's memory to 1.5GB
-    //     '--disable-gpu-sandbox',
-    //     '--disable-software-rasterizer',
-    //     '--memory-pressure-off',
-    //     '--max_old_space_size=1536',
-    //     '--disable-background-timer-throttling',
-    //     '--disable-backgrounding-occluded-windows',
-    //     '--disable-renderer-backgrounding',
-    //     '--disable-features=TranslateUI',
-    //     '--disable-ipc-flooding-protection',
-    //     '--js-flags=--expose-gc --max-old-space-size=1536'
-    //   ],
-    //   handleSIGINT: false,
-    //   handleSIGTERM: false,
-    //   handleSIGHUP: false
-    // });
-
-    const browser = await puppeteer.connect({
-      browserWSEndpoint:
-        "wss://cloud.lightpanda.io/ws?token=609ea65bd25664a2d258526188f5492ba7aa0a63e26b4e69faefb9a1bc635d4b",
-        args: [
-          '--enable-gpu',
-          '--disable-dev-shm-usage',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-web-security',
-          '--disable-features=IsolateOrigins',
-          '--disable-site-isolation-trials',
-          '--disable-blink-features=AutomationControlled',
-          '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          '--max-old-space-size=1536', // Limit Chrome's memory to 1.5GB
-          '--disable-gpu-sandbox',
-          '--disable-software-rasterizer',
-          '--memory-pressure-off',
-          '--max_old_space_size=1536',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-features=TranslateUI',
-          '--disable-ipc-flooding-protection',
-          '--js-flags=--expose-gc --max-old-space-size=1536'
-        ],
-      // defaultViewport: null,
-      // headless: true,
-      // handleSIGINT: false,
-      // handleSIGTERM: false,
-      // handleSIGHUP: false
+    const browser = await puppeteer.launch({
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        '--enable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins',
+        '--disable-site-isolation-trials',
+        '--disable-blink-features=AutomationControlled',
+        '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--max-old-space-size=1536', // Limit Chrome's memory to 1.5GB
+        '--disable-gpu-sandbox',
+        '--disable-software-rasterizer',
+        '--memory-pressure-off',
+        '--max_old_space_size=1536',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--js-flags=--expose-gc --max-old-space-size=1536'
+      ],
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false
     });
+
+    // const browser = await puppeteer.connect({
+    //   browserWSEndpoint:
+    //     "wss://cloud.lightpanda.io/ws?token=609ea65bd25664a2d258526188f5492ba7aa0a63e26b4e69faefb9a1bc635d4b",
+    // });
 
     // Set up browser crash handler
     browser.on('disconnected', () => {
