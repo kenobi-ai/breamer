@@ -11,6 +11,29 @@ console.log("Env slice::", JSON.stringify({
 }, null, 2));
 
 const app = express();
+
+// Cloud Run specific middleware
+app.set('trust proxy', true); // Trust Cloud Run's proxy
+app.use((req, res, next) => {
+  // Handle Cloud Run's health checks
+  if (req.url === '/' && req.headers['user-agent']?.includes('GoogleHC')) {
+    return res.status(200).send('OK');
+  }
+  
+  // Add CORS headers for all requests
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+});
+
 app.use(express.json()); // Add JSON body parser
 const httpServer = createServer(app);
 
@@ -336,13 +359,15 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start server
-// Default to 8080 for Cloudflare Workers, 3003 for traditional deployment
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : (process.env.CF_PAGES ? 8080 : 3003);
+// Default to 8080 for Cloud Run/Cloudflare, 3003 for local development
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8080;
 const HOST = '0.0.0.0'; // Listen on all interfaces
 httpServer.listen(PORT, HOST, () => {
   console.log(`🚀 Breamer server running on ${HOST}:${PORT}`);
-  console.log(`🔌 Socket.io server ready at http://localhost:${PORT}`);
+  console.log(`🔌 Socket.io server ready`);
   console.log(`📡 Socket.io path: /socket.io/`);
-  console.log(`🔧 CORS: Allowing all origins (*) for debugging`);
-  console.log(`🔄 Transports: websocket, polling`);
+  console.log(`🔧 CORS: Allowing all origins (*)`);
+  console.log(`🔄 Transports: polling → websocket`);
+  console.log(`☁️  Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔐 Trust proxy: enabled`);
 });
