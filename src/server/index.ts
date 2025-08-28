@@ -37,6 +37,9 @@ app.use((req, res, next) => {
 app.use(express.json()); // Add JSON body parser
 const httpServer = createServer(app);
 
+// Detect if running on Cloud Run
+const isCloudRun = process.env.K_SERVICE || process.env.CLOUD_RUN_SERVICE;
+
 // Configure Socket.io with CORS
 const io = new Server(httpServer, {
   path: '/socket.io/',
@@ -49,10 +52,11 @@ const io = new Server(httpServer, {
   // Increased timeouts for long-lived connections
   pingInterval: 60000,  // 60 seconds
   pingTimeout: 300000,  // 5 minutes
-  // For Cloud Run, start with polling then upgrade to WebSocket
-  transports: ['polling', 'websocket'],
-  // Allow transport upgrades
-  allowUpgrades: true,
+  // IMPORTANT: For Cloud Run, use WebSocket only to avoid session affinity issues
+  // Polling requires sticky sessions which Cloud Run doesn't guarantee reliably
+  transports: isCloudRun ? ['websocket'] : ['polling', 'websocket'],
+  // Allow transport upgrades only if not on Cloud Run
+  allowUpgrades: !isCloudRun,
   // Disable perMessageDeflate for better compatibility
   perMessageDeflate: false,
   // Disable connection state recovery to avoid session ID issues
@@ -64,7 +68,14 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8, // 100 MB
   allowEIO3: true, // Allow older clients
   // Cloud Run specific: handle HTTP/2
-  httpCompression: false
+  httpCompression: false,
+  // Add cookie configuration for session affinity
+  cookie: isCloudRun ? {
+    name: 'io',
+    httpOnly: true,
+    sameSite: 'none',
+    secure: true
+  } : false
 });
 
 // Simple health check endpoint
@@ -367,7 +378,12 @@ httpServer.listen(PORT, HOST, () => {
   console.log(`🔌 Socket.io server ready`);
   console.log(`📡 Socket.io path: /socket.io/`);
   console.log(`🔧 CORS: Allowing all origins (*)`);
-  console.log(`🔄 Transports: polling → websocket`);
+  console.log(`🔄 Transports: ${isCloudRun ? 'websocket-only (Cloud Run mode)' : 'polling → websocket'}`);
   console.log(`☁️  Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔐 Trust proxy: enabled`);
+  console.log(`🏃 Running on: ${isCloudRun ? 'Google Cloud Run' : 'Standard deployment'}`);
+  
+  if (isCloudRun) {
+    console.log('⚠️  Cloud Run detected - using WebSocket-only mode to avoid session affinity issues');
+  }
 });
