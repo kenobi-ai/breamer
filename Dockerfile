@@ -50,7 +50,8 @@ RUN apt-get update -qq && \
 COPY --from=build /app /app
 
 # Start the server by default, this can be overwritten at runtime
-EXPOSE 3003
+# Support both Cloudflare Workers (8080) and Fly (3003)
+EXPOSE 3003 8080
 ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
-ENV PORT="3003"
+# PORT will be set by the platform (Workers sets it to 8080)
 CMD [ "pnpm", "run", "start" ]

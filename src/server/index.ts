@@ -19,14 +19,19 @@ const io = new Server(httpServer, {
   path: '/socket.io/',
   cors: {
     origin: '*', // Allow all origins for debugging
-    methods: ['GET', 'POST'],
-    credentials: true
+    methods: ['GET', 'POST', 'OPTIONS'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
   },
   // Increased timeouts for long-lived connections
   pingInterval: 60000,  // 60 seconds
   pingTimeout: 300000,  // 5 minutes
-  // Prefer WebSocket for better performance
-  transports: ['websocket', 'polling'],
+  // For Cloud Run, start with polling then upgrade to WebSocket
+  transports: ['polling', 'websocket'],
+  // Allow transport upgrades
+  allowUpgrades: true,
+  // Disable perMessageDeflate for better compatibility
+  perMessageDeflate: false,
   // Disable connection state recovery to avoid session ID issues
   connectionStateRecovery: {
     maxDisconnectionDuration: 0, // Disable recovery
@@ -34,7 +39,9 @@ const io = new Server(httpServer, {
   },
   // Allow unlimited connections
   maxHttpBufferSize: 1e8, // 100 MB
-  allowEIO3: true // Allow older clients
+  allowEIO3: true, // Allow older clients
+  // Cloud Run specific: handle HTTP/2
+  httpCompression: false
 });
 
 // Simple health check endpoint
@@ -329,7 +336,8 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start server
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3003;
+// Default to 8080 for Cloudflare Workers, 3003 for traditional deployment
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : (process.env.CF_PAGES ? 8080 : 3003);
 const HOST = '0.0.0.0'; // Listen on all interfaces
 httpServer.listen(PORT, HOST, () => {
   console.log(`🚀 Breamer server running on ${HOST}:${PORT}`);

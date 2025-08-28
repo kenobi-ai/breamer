@@ -1,0 +1,38 @@
+name = "breamer"
+main = "src/workers-entry.ts"
+compatibility_date = "2024-01-01"
+
+# Durable Objects binding
+[[durable_objects.bindings]]
+name = "CONTAINER"
+class_name = "BreamerContainer"
+
+# Container configuration with proper instance type
+[[containers]]
+class_name = "BreamerContainer"
+image = "./Dockerfile"
+instance_type = "standard"  # 4GB RAM, 1/2 vCPU for Puppeteer
+max_instances = 1  # Maximum number of container instances
+
+# Migrations (using SQLite for free plan)
+[[migrations]]
+tag = "v2"
+renamed_classes = [
+  { from = "Container", to = "BreamerContainer" }
+]
+
+# Environment variables (add your secrets in the Cloudflare dashboard)
+[vars]
+NODE_ENV = "production"
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+PORT = "8080"
+
+# Routes (optional - configure your domain)
+# [[routes]]
+# pattern = "breamer.example.com/*"
+# zone_name = "example.com"
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"
