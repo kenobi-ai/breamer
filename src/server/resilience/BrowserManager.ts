@@ -1,5 +1,6 @@
 import puppeteer from "puppeteer";
 import type { Browser, Page, CDPSession } from "puppeteer";
+import type { Socket } from "socket.io";
 
 interface ClientSession {
   browser: Browser;
@@ -8,6 +9,12 @@ interface ClientSession {
   lastActivity: number;
   healthCheckFailures: number;
   isHealthy: boolean;
+  requiresBootstrap: boolean;
+  wasRecovered: boolean;
+  viewport: {
+    width: number;
+    height: number;
+  };
 }
 
 interface BrowserManagerOptions {
@@ -65,6 +72,12 @@ export class ResilientBrowserManager {
           lastActivity: Date.now(),
           healthCheckFailures: 0,
           isHealthy: true,
+          requiresBootstrap: true,
+          wasRecovered: false,
+          viewport: {
+            width: viewportWidth,
+            height: viewportHeight,
+          },
         };
 
         this.sessions.set(clientId, session);
@@ -92,26 +105,19 @@ export class ResilientBrowserManager {
       headless: true,
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: [
-        "--enable-gpu",
-        "--disable-dev-shm-usage",
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-web-security",
-        "--disable-features=IsolateOrigins",
-        "--disable-site-isolation-trials",
-        "--disable-blink-features=AutomationControlled",
-        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "--max-old-space-size=1536", // Limit Chrome's memory to 1.5GB
-        "--disable-gpu-sandbox",
-        "--disable-software-rasterizer",
-        "--memory-pressure-off",
-        "--max_old_space_size=1536",
+        "--disable-dev-shm-usage",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
+        "--disable-gpu",
+        "--disable-features=IsolateOrigins,site-per-process",
         "--disable-features=TranslateUI",
         "--disable-ipc-flooding-protection",
-        "--js-flags=--expose-gc --max-old-space-size=1536",
+        "--js-flags=--max-old-space-size=2048",
+        "--window-size=1440,1880",
+        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       ],
       handleSIGINT: false,
       handleSIGTERM: false,
@@ -299,7 +305,9 @@ export class ResilientBrowserManager {
     }
   }
 
-  private async recoverSession(clientId: string): Promise<void> {
+  private async recoverSession(
+    clientId: string
+  ): Promise<ClientSession | null> {
     console.log(
       `[Recovery] Starting session recovery for ${clientId} at ${new Date().toLocaleTimeString()}`
     );
@@ -310,33 +318,42 @@ export class ResilientBrowserManager {
         `[Recovery] Old session state: isHealthy=${oldSession.isHealthy}, healthCheckFailures=${oldSession.healthCheckFailures}`
       );
     }
+    const lastViewport = oldSession?.viewport ?? {
+      width: 1440,
+      height: 1880,
+    };
 
     // Clean up old session
     await this.cleanupSession(clientId, false);
 
     try {
       // Create new session
-      await this.createSession(clientId);
+      const newSession = await this.createSession(
+        clientId,
+        lastViewport.width,
+        lastViewport.height
+      );
+      newSession.wasRecovered = true;
       console.log(
         `[Recovery] Successfully recovered session for ${clientId} at ${new Date().toLocaleTimeString()}`
       );
 
-      // Send recovery notification to client
-      const ws = (global as any).activeConnections?.get(clientId);
-      if (ws && ws.readyState === 1) {
-        ws.send(
-          JSON.stringify({
-            type: "session_recovered",
-            message: "Browser session was recovered successfully",
-          })
-        );
-      }
+      // Send recovery notification to client via stored socket reference
+      const socket: Socket | undefined = (global as any).activeSockets?.get(
+        clientId
+      );
+      socket?.emit("session_recovered", {
+        message: "Browser session was recovered successfully",
+      });
+
+      return newSession;
     } catch (error) {
       console.error(
         `[Recovery] Failed to recover session for ${clientId}:`,
         error
       );
       // Session will be cleaned up by caller
+      return null;
     }
   }
 
@@ -350,10 +367,8 @@ export class ResilientBrowserManager {
     // If session is unhealthy, attempt recovery
     if (!session.isHealthy) {
       console.log(`Session ${clientId} is unhealthy, attempting recovery...`);
-      await this.recoverSession(clientId);
+      const newSession = await this.recoverSession(clientId);
 
-      // Get the newly created session
-      const newSession = this.sessions.get(clientId);
       if (!newSession || !newSession.isHealthy) {
         console.error(`Failed to recover session ${clientId}`);
         return null;
@@ -477,19 +492,24 @@ export class ResilientBrowserManager {
     }
 
     try {
-      // Update the page viewport
+      const currentWidth = session.viewport?.width ?? null;
+      const currentHeight = session.viewport?.height ?? null;
+
+      if (currentWidth === width && currentHeight === height) {
+        return;
+      }
+
       await session.page.setViewport({ width, height });
       console.log(
         `[Viewport] Updated page viewport for ${clientId} to ${width}x${height}`
       );
 
-      // Stop current screencast
-      await session.cdpSession.send("Page.stopScreencast").catch(() => {});
+      session.viewport = { width, height };
+      session.requiresBootstrap = true;
 
-      // Restart screencast with new dimensions
-      await this.initializeScreencast(session.cdpSession, width, height);
+      await session.cdpSession.send("Page.stopScreencast").catch(() => {});
       console.log(
-        `[Viewport] Restarted screencast for ${clientId} with new dimensions`
+        `[Viewport] Pending screencast restart for ${clientId} after resize`
       );
     } catch (error) {
       console.error(

@@ -22,7 +22,12 @@ FROM base AS build
 
 # Install packages needed to build node modules
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3
+    apt-get install --no-install-recommends -y \
+      build-essential \
+      node-gyp \
+      pkg-config \
+      python-is-python3 && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Install node modules
 COPY package.json pnpm-lock.yaml ./
@@ -41,9 +46,31 @@ RUN pnpm prune --prod
 # Final stage for app image
 FROM base
 
-# Install packages needed for deployment
+# Install Chromium and required system libraries
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y chromium chromium-sandbox && \
+    apt-get install --no-install-recommends -y \
+      chromium \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libcups2 \
+      libdrm2 \
+      libgbm1 \
+      libglib2.0-0 \
+      libgtk-3-0 \
+      libnspr4 \
+      libnss3 \
+      libx11-6 \
+      libx11-xcb1 \
+      libxcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxext6 \
+      libxfixes3 \
+      libxkbcommon0 \
+      libxrandr2 \
+      libxshmfence1 \
+      xdg-utils && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Copy built application
