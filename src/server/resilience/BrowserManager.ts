@@ -240,10 +240,10 @@ export class ResilientBrowserManager {
 
     await cdpSession.send("Page.startScreencast", {
       format: "jpeg",
-      quality: 50, // Further reduced quality
+      quality: 70, // Further reduced quality
       maxWidth: maxWidth,
       maxHeight: maxHeight,
-      everyNthFrame: 2, // Skip every other frame
+      everyNthFrame: 1, // Skip every other frame
     });
     console.log("Screencast started");
   }

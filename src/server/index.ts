@@ -389,6 +389,7 @@ io.on("connection", (socket) => {
 
   socket.on("evaluate", async (data) => {
     try {
+      console.log("got code to evaluate", JSON.stringify(data, null, 2));
       const session = await browserManager.getSession(clientId);
       if (!session) {
         socket.emit("error", {
@@ -402,7 +403,7 @@ io.on("connection", (socket) => {
       await ResilientMessageHandlers.handleEvaluate(
         session.page,
         socket,
-        data.code
+        data.javaScript
       );
     } catch (error) {
       console.error("Unhandled evaluate error:", error);
