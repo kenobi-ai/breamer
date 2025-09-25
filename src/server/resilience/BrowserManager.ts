@@ -1,7 +1,7 @@
 import type { Browser, CDPSession, Page } from "puppeteer";
 
 import type { Socket } from "socket.io";
-import { applyCmpRequestBlocking } from "./interceptors/cmpBlocklist";
+import { applyCmpRequestBlocking } from "./interceptors/cmpBlocklist.js";
 import puppeteer from "puppeteer";
 
 interface ClientSession {
