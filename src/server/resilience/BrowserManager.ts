@@ -1,6 +1,7 @@
 import type { Browser, CDPSession, Page } from "puppeteer";
 
 import type { Socket } from "socket.io";
+import { applyCmpRequestBlocking } from "./interceptors/cmpBlocklist";
 import puppeteer from "puppeteer";
 
 interface ClientSession {
@@ -167,7 +168,7 @@ export class ResilientBrowserManager {
     viewportHeight = 1880
   ): Promise<Page> {
     const page = await browser.newPage();
-    // await applyCmpRequestBlocking(page);
+    await applyCmpRequestBlocking(page);
 
     // Page crash handler
 
