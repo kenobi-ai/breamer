@@ -4,6 +4,12 @@ import type { Socket } from "socket.io";
 import { applyCmpRequestBlocking } from "./interceptors/cmpBlocklist.js";
 import puppeteer from "puppeteer";
 
+interface RuntimeState {
+  source: string;
+  antiScrollSource?: string;
+  scriptIdentifier?: string;
+}
+
 interface ClientSession {
   browser: Browser;
   page: Page;
@@ -17,6 +23,7 @@ interface ClientSession {
     width: number;
     height: number;
   };
+  runtime?: RuntimeState;
 }
 
 interface BrowserManagerOptions {
@@ -80,6 +87,7 @@ export class ResilientBrowserManager {
             width: viewportWidth,
             height: viewportHeight,
           },
+          runtime: undefined,
         };
 
         this.sessions.set(clientId, session);
@@ -316,6 +324,7 @@ export class ResilientBrowserManager {
     );
 
     const oldSession = this.sessions.get(clientId);
+    const previousRuntime = oldSession?.runtime;
     if (oldSession) {
       console.log(
         `[Recovery] Old session state: isHealthy=${oldSession.isHealthy}, healthCheckFailures=${oldSession.healthCheckFailures}`
@@ -337,6 +346,22 @@ export class ResilientBrowserManager {
         lastViewport.height
       );
       newSession.wasRecovered = true;
+
+      if (previousRuntime?.source) {
+        try {
+          await this.applyRuntimeToSession(
+            clientId,
+            newSession,
+            previousRuntime.source,
+            previousRuntime.antiScrollSource
+          );
+        } catch (runtimeError) {
+          console.error(
+            `[Recovery] Failed to reinstall runtime for ${clientId}:`,
+            runtimeError
+          );
+        }
+      }
       console.log(
         `[Recovery] Successfully recovered session for ${clientId} at ${new Date().toLocaleTimeString()}`
       );
@@ -385,6 +410,49 @@ export class ResilientBrowserManager {
 
   getSessions(): Map<string, ClientSession> {
     return this.sessions;
+  }
+
+  async installRuntime(
+    clientId: string,
+    runtimeSource: string,
+    antiScrollSource?: string
+  ): Promise<void> {
+    const session = await this.getSession(clientId);
+
+    if (!session) {
+      throw new Error(`Session not found for client ${clientId}`);
+    }
+
+    await this.applyRuntimeToSession(
+      clientId,
+      session,
+      runtimeSource,
+      antiScrollSource
+    );
+  }
+
+  async reapplyRuntime(clientId: string): Promise<void> {
+    const session = this.sessions.get(clientId);
+    if (!session?.runtime?.source) {
+      return;
+    }
+
+    try {
+      if (session.runtime.antiScrollSource) {
+        await this.evaluateSource(
+          session,
+          session.runtime.antiScrollSource,
+          "anti-scroll"
+        );
+      }
+
+      await this.evaluateSource(session, session.runtime.source, "runtime");
+    } catch (error) {
+      console.error(
+        `[Runtime] Failed to reapply runtime for ${clientId}:`,
+        error
+      );
+    }
   }
 
   async cleanupSession(clientId: string, removeFromMap = true): Promise<void> {
@@ -525,5 +593,72 @@ export class ResilientBrowserManager {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async applyRuntimeToSession(
+    clientId: string,
+    session: ClientSession,
+    runtimeSource: string,
+    antiScrollSource?: string
+  ): Promise<void> {
+    const trimmedSource = runtimeSource?.trim();
+    if (!trimmedSource) {
+      throw new Error("Runtime source is empty");
+    }
+
+    if (session.runtime?.scriptIdentifier) {
+      try {
+        await session.cdpSession.send(
+          "Page.removeScriptToEvaluateOnNewDocument",
+          {
+            identifier: session.runtime.scriptIdentifier,
+          }
+        );
+      } catch (error) {
+        console.warn(
+          `[Runtime] Failed to remove previous script for ${clientId}:`,
+          error
+        );
+      }
+    }
+
+    const addScriptResponse = await session.cdpSession.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      {
+        source: trimmedSource,
+      }
+    );
+
+    session.runtime = {
+      source: trimmedSource,
+      antiScrollSource,
+      scriptIdentifier: addScriptResponse?.identifier,
+    };
+
+    if (antiScrollSource?.trim()) {
+      await this.evaluateSource(session, antiScrollSource, "anti-scroll");
+    }
+
+    await this.evaluateSource(session, trimmedSource, "runtime");
+  }
+
+  private async evaluateSource(
+    session: ClientSession,
+    source: string,
+    label: string
+  ): Promise<void> {
+    const trimmedSource = source?.trim();
+    if (!trimmedSource) {
+      return;
+    }
+
+    await session.cdpSession.send("Runtime.evaluate", {
+      expression: trimmedSource,
+      awaitPromise: true,
+      userGesture: true,
+      allowUnsafeEvalBlockedByCSP: true,
+    });
+
+    console.log(`[Runtime] Executed ${label} script`);
   }
 }

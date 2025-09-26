@@ -267,6 +267,8 @@ io.on("connection", (socket) => {
         socket,
         data.url
       );
+
+      await browserManager.reapplyRuntime(clientId);
     } catch (error) {
       console.error("Unhandled navigate error:", error);
       socket.emit("error", {
@@ -410,6 +412,48 @@ io.on("connection", (socket) => {
       socket.emit("error", {
         type: "evaluate",
         message: "Internal server error",
+        recoverable: true,
+      });
+    }
+  });
+
+  socket.on("install_runtime", async (payload) => {
+    try {
+      const { runtimeSource, antiScrollSource } = payload ?? {};
+
+      if (typeof runtimeSource !== "string" || runtimeSource.trim().length === 0) {
+        socket.emit("runtime_installed", {
+          success: false,
+          error: "runtimeSource must be a non-empty string",
+        });
+        return;
+      }
+
+      const session = await browserManager.getSession(clientId);
+      if (!session) {
+        socket.emit("runtime_installed", {
+          success: false,
+          error: "Session not available",
+          recoverable: true,
+        });
+        return;
+      }
+
+      await ensureSessionBootstrapped(clientId, session, socket);
+      await browserManager.installRuntime(
+        clientId,
+        runtimeSource,
+        typeof antiScrollSource === "string" ? antiScrollSource : undefined
+      );
+
+      socket.emit("runtime_installed", {
+        success: true,
+      });
+    } catch (error) {
+      console.error("Unhandled install_runtime error:", error);
+      socket.emit("runtime_installed", {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
         recoverable: true,
       });
     }
