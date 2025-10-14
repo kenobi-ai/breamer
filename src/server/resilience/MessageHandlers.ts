@@ -67,16 +67,16 @@ export class ResilientMessageHandlers {
           });
 
           try {
-            const pressHoldResult = await trySolvePressAndHoldChallenge(page);
-            if (pressHoldResult.detected) {
+            const challengeResult = await trySolvePressAndHoldChallenge(page);
+            if (challengeResult.detected) {
               socket.emit("challenge_status", {
                 type: "press_and_hold",
-                solved: pressHoldResult.solved,
-                reason: pressHoldResult.reason,
+                solved: challengeResult.solved,
+                reason: challengeResult.reason,
               });
-              if (!pressHoldResult.solved) {
+              if (!challengeResult.solved) {
                 console.warn(
-                  `Press & Hold challenge unresolved: ${pressHoldResult.reason ?? "no reason provided"}`
+                  `Press & Hold challenge unresolved: ${challengeResult.reason ?? "no reason provided"}`
                 );
               }
             }
@@ -88,6 +88,7 @@ export class ResilientMessageHandlers {
                 : solverError
             );
           }
+
         },
         {
           retries: this.config.navigation.retries,

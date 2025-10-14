@@ -1,4 +1,4 @@
-import type { ElementHandle, Frame, Page } from "puppeteer";
+import type { Frame, Page } from "puppeteer";
 
 interface PressHoldResult {
   detected: boolean;
@@ -6,120 +6,105 @@ interface PressHoldResult {
   reason?: string;
 }
 
-const PRESS_HOLD_TEXT = /press\s*&?\s*hold/i;
-
-const randomJitter = (min: number, max: number): number =>
-  Math.random() * (max - min) + min;
+const KEYBOARD_TAB_ATTEMPTS = 12;
+const HOLD_DURATION_MS = 2600;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-async function getPressHoldButton(
-  frame: Frame
-): Promise<ElementHandle<Element> | null> {
-  const buttons = await frame.$$("button");
-  for (const button of buttons) {
-    let matchesChallenge = false;
-    try {
-      const text = await frame.evaluate(
-        (el) => el.textContent ?? "",
-        button
+const PRESS_HOLD_REGEX = /press\s*&?\s*hold/i;
+
+async function frameHasPressHold(frame: Frame): Promise<boolean> {
+  try {
+    return await frame.evaluate((regexSource) => {
+      const regex = new RegExp(regexSource, "i");
+      const allButtons = Array.from(
+        document.querySelectorAll("button, [role='button']")
       );
-      matchesChallenge = PRESS_HOLD_TEXT.test(text);
-    } catch {
-      // Ignore evaluation errors and continue scanning.
-    }
-    if (matchesChallenge) {
-      return button;
-    }
-    await button.dispose().catch(() => {});
+      return allButtons.some((element) => {
+        const text =
+          element.textContent ??
+          element.getAttribute("aria-label") ??
+          element.getAttribute("data-text");
+        return text ? regex.test(text) : false;
+      });
+    }, PRESS_HOLD_REGEX.source);
+  } catch {
+    return false;
   }
-  return null;
+}
+
+async function activeElementMatches(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate((regexSource) => {
+      const active = document.activeElement;
+      if (!active) return false;
+      const regex = new RegExp(regexSource, "i");
+      const candidates = [
+        active.textContent ?? "",
+        active.getAttribute("aria-label") ?? "",
+        active.getAttribute("data-text") ?? "",
+      ];
+      return candidates.some((value) => (value ? regex.test(value) : false));
+    }, PRESS_HOLD_REGEX.source);
+  } catch {
+    return false;
+  }
+}
+
+async function detectChallenge(page: Page): Promise<boolean> {
+  for (const frame of page.frames()) {
+    if (await frameHasPressHold(frame)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function pressAndHold(page: Page): Promise<void> {
+  await page.keyboard.down("Enter");
+  await sleep(HOLD_DURATION_MS);
+  await page.keyboard.up("Enter");
 }
 
 export async function trySolvePressAndHoldChallenge(
   page: Page
 ): Promise<PressHoldResult> {
-  for (const frame of page.frames()) {
-    let button: ElementHandle<Element> | null = null;
-    try {
-      button = await getPressHoldButton(frame);
-      if (!button) {
-        continue;
-      }
-
-      await button.evaluate((el) =>
-        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
-      );
-
-      const boundingBox = await button.boundingBox();
-      if (!boundingBox) {
-        return {
-          detected: true,
-          solved: false,
-          reason: "Press & Hold button not visible",
-        };
-      }
-
-      const centerX = boundingBox.x + boundingBox.width / 2;
-      const centerY = boundingBox.y + boundingBox.height / 2;
-
-      await page.mouse.move(
-        centerX + randomJitter(-4, 4),
-        centerY + randomJitter(-4, 4),
-        { steps: 8 }
-      );
-
-      await page.mouse.down({ button: "left" });
-
-      const holdDuration = 2200 + randomJitter(-400, 600);
-      const jitterSteps = 3 + Math.floor(Math.random() * 3);
-      for (let step = 0; step < jitterSteps; step++) {
-        await sleep(holdDuration / (jitterSteps + 1));
-        await page.mouse.move(
-          centerX + randomJitter(-6, 6),
-          centerY + randomJitter(-6, 6),
-          { steps: 4 }
-        );
-      }
-
-      await sleep(holdDuration / (jitterSteps + 1));
-      await page.mouse.up({ button: "left" });
-
-      const cleared = await frame
-        .waitForFunction(() => {
-          const buttons = Array.from(
-            document.querySelectorAll("button")
-          );
-          return !buttons.some((el) =>
-            /press\s*&?\s*hold/i.test(el.textContent ?? "")
-          );
-        }, { timeout: 5000 })
-        .then(() => true)
-        .catch(() => false);
-
-      if (cleared) {
-        return { detected: true, solved: true };
-      }
-
-      return {
-        detected: true,
-        solved: false,
-        reason: "Challenge still present after simulated hold",
-      };
-    } catch (error) {
-      return {
-        detected: Boolean(button),
-        solved: false,
-        reason:
-          error instanceof Error ? error.message : "Unknown press-hold error",
-      };
-    } finally {
-      if (button) {
-        await button.dispose().catch(() => {});
-      }
-    }
+  const detected = await detectChallenge(page);
+  if (!detected) {
+    return { detected: false, solved: false };
   }
 
-  return { detected: false, solved: false };
+  let focused = await activeElementMatches(page);
+
+  for (
+    let attempt = 0;
+    attempt < KEYBOARD_TAB_ATTEMPTS && !focused;
+    attempt++
+  ) {
+    await page.keyboard.press("Tab").catch(() => {});
+    await sleep(150);
+    focused = await activeElementMatches(page);
+  }
+
+  if (!focused) {
+    return {
+      detected: true,
+      solved: false,
+      reason: "Unable to focus press-and-hold control via keyboard",
+    };
+  }
+
+  await sleep(120);
+  await pressAndHold(page);
+  await sleep(600);
+
+  const stillPresent = await detectChallenge(page);
+  return {
+    detected: true,
+    solved: !stillPresent,
+    reason: stillPresent
+      ? "Press-and-hold challenge still present after keyboard simulation"
+      : undefined,
+  };
 }
