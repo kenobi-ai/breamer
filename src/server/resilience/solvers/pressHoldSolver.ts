@@ -7,8 +7,11 @@ interface PressHoldResult {
 }
 
 const KEYBOARD_TAB_ATTEMPTS = 25;
-const HOLD_DURATION_MS = 8000;
-const RESOLUTION_TIMEOUT_MS = 8000;
+const PRE_ENTER_PAUSE_MS = 1200;
+const BETWEEN_TAB_PAUSE_MS = 250;
+const PRE_HOLD_PAUSE_MS = 800;
+const HOLD_DURATION_MS = 10000;
+const RESOLUTION_TIMEOUT_MS = 10000;
 const RESOLUTION_POLL_INTERVAL_MS = 400;
 
 const sleep = (ms: number): Promise<void> =>
@@ -63,6 +66,35 @@ async function detectChallenge(page: Page): Promise<boolean> {
   return false;
 }
 
+async function hasPerimeterxSignals(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => {
+      const regex = /perimeterx|press.?hold|px-cloud|pxinterceptors/i;
+      const scripts = Array.from(document.querySelectorAll("script")).some(
+        (script) => {
+          const src = script.getAttribute("src") || "";
+          return regex.test(src);
+        }
+      );
+      const iframes = Array.from(document.querySelectorAll("iframe")).some(
+        (iframe) => {
+          const src = iframe.getAttribute("src") || "";
+          const id = iframe.getAttribute("id") || "";
+          const title = iframe.getAttribute("title") || "";
+          return regex.test(src) || regex.test(id) || regex.test(title);
+        }
+      );
+      const globals =
+        typeof (window as any)._pxAppId !== "undefined" ||
+        typeof (window as any).pxsin !== "undefined" ||
+        typeof (window as any)._pxOnload !== "undefined";
+      return scripts || iframes || globals;
+    });
+  } catch {
+    return false;
+  }
+}
+
 async function pressAndHold(page: Page): Promise<void> {
   await page.keyboard.down("Enter");
   await sleep(HOLD_DURATION_MS);
@@ -72,10 +104,16 @@ async function pressAndHold(page: Page): Promise<void> {
 export async function trySolvePressAndHoldChallenge(
   page: Page
 ): Promise<PressHoldResult> {
-  const detected = await detectChallenge(page);
-  if (!detected) {
+  const directDetection = await detectChallenge(page);
+  const pxSignals = await hasPerimeterxSignals(page);
+  const shouldAttempt = directDetection || pxSignals;
+
+  if (!shouldAttempt) {
     return { detected: false, solved: false };
   }
+
+  await page.keyboard.press("Enter").catch(() => {});
+  await sleep(PRE_ENTER_PAUSE_MS);
 
   let focused = await activeElementMatches(page);
 
@@ -85,19 +123,11 @@ export async function trySolvePressAndHoldChallenge(
     attempt++
   ) {
     await page.keyboard.press("Tab").catch(() => {});
-    await sleep(150);
+    await sleep(BETWEEN_TAB_PAUSE_MS);
     focused = await activeElementMatches(page);
   }
 
-  if (!focused) {
-    return {
-      detected: true,
-      solved: false,
-      reason: "Unable to focus press-and-hold control via keyboard",
-    };
-  }
-
-  await sleep(120);
+  await sleep(PRE_HOLD_PAUSE_MS);
   await pressAndHold(page);
   await sleep(600);
 
@@ -112,10 +142,12 @@ export async function trySolvePressAndHoldChallenge(
   }
 
   return {
-    detected: true,
+    detected: shouldAttempt,
     solved: !stillPresent,
-    reason: stillPresent
-      ? "Press-and-hold challenge still present after keyboard simulation"
-      : undefined,
+    reason: !stillPresent
+      ? undefined
+      : focused
+        ? "Press-and-hold challenge still present after keyboard simulation"
+        : "Unable to focus press-and-hold control via keyboard (possible closed shadow DOM)",
   };
 }
