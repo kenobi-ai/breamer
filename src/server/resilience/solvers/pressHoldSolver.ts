@@ -6,8 +6,10 @@ interface PressHoldResult {
   reason?: string;
 }
 
-const KEYBOARD_TAB_ATTEMPTS = 12;
-const HOLD_DURATION_MS = 2600;
+const KEYBOARD_TAB_ATTEMPTS = 25;
+const HOLD_DURATION_MS = 8000;
+const RESOLUTION_TIMEOUT_MS = 8000;
+const RESOLUTION_POLL_INTERVAL_MS = 400;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -99,7 +101,16 @@ export async function trySolvePressAndHoldChallenge(
   await pressAndHold(page);
   await sleep(600);
 
-  const stillPresent = await detectChallenge(page);
+  let stillPresent = true;
+  const endTime = Date.now() + RESOLUTION_TIMEOUT_MS;
+  while (Date.now() < endTime) {
+    stillPresent = await detectChallenge(page);
+    if (!stillPresent) {
+      break;
+    }
+    await sleep(RESOLUTION_POLL_INTERVAL_MS);
+  }
+
   return {
     detected: true,
     solved: !stillPresent,
