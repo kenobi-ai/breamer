@@ -1,5 +1,7 @@
 import type { Frame, Page } from "puppeteer";
 
+const logPrefix = "[PressHoldSolver]";
+
 interface PressHoldResult {
   detected: boolean;
   solved: boolean;
@@ -35,6 +37,7 @@ async function frameHasPressHold(frame: Frame): Promise<boolean> {
       });
     }, PRESS_HOLD_REGEX.source);
   } catch {
+    console.debug(`${logPrefix} Frame evaluation failed while searching for button`);
     return false;
   }
 }
@@ -53,6 +56,7 @@ async function activeElementMatches(page: Page): Promise<boolean> {
       return candidates.some((value) => (value ? regex.test(value) : false));
     }, PRESS_HOLD_REGEX.source);
   } catch {
+    console.debug(`${logPrefix} Unable to read activeElement`);
     return false;
   }
 }
@@ -91,6 +95,7 @@ async function hasPerimeterxSignals(page: Page): Promise<boolean> {
       return scripts || iframes || globals;
     });
   } catch {
+    console.debug(`${logPrefix} Unable to evaluate PerimeterX signals`);
     return false;
   }
 }
@@ -108,6 +113,8 @@ export async function trySolvePressAndHoldChallenge(
   const pxSignals = await hasPerimeterxSignals(page);
   const shouldAttempt = directDetection || pxSignals;
 
+  console.log(`${logPrefix} Detected=${directDetection} pxSignals=${pxSignals}`);
+
   if (!shouldAttempt) {
     return { detected: false, solved: false };
   }
@@ -116,6 +123,7 @@ export async function trySolvePressAndHoldChallenge(
   await sleep(PRE_ENTER_PAUSE_MS);
 
   let focused = await activeElementMatches(page);
+  console.log(`${logPrefix} Initial focus=${focused}`);
 
   for (
     let attempt = 0;
@@ -125,6 +133,7 @@ export async function trySolvePressAndHoldChallenge(
     await page.keyboard.press("Tab").catch(() => {});
     await sleep(BETWEEN_TAB_PAUSE_MS);
     focused = await activeElementMatches(page);
+    console.log(`${logPrefix} Tab attempt ${attempt + 1}, focused=${focused}`);
   }
 
   await sleep(PRE_HOLD_PAUSE_MS);
@@ -139,7 +148,10 @@ export async function trySolvePressAndHoldChallenge(
       break;
     }
     await sleep(RESOLUTION_POLL_INTERVAL_MS);
+    console.log(`${logPrefix} Polling... stillPresent=${stillPresent}`);
   }
+
+  console.log(`${logPrefix} Result detected=${shouldAttempt} solved=${!stillPresent} focused=${focused}`);
 
   return {
     detected: shouldAttempt,

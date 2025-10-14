@@ -1,8 +1,11 @@
 import type { Browser, CDPSession, Page } from "puppeteer";
 
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import type { Socket } from "socket.io";
+import puppeteer from "puppeteer-extra";
 import { applyCmpRequestBlocking } from "./interceptors/cmpBlocklist.js";
-import puppeteer from "puppeteer";
+
+puppeteer.use(StealthPlugin());
 
 interface RuntimeState {
   source: string;
