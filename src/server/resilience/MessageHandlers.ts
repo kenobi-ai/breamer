@@ -2,6 +2,7 @@ import type { Page } from "puppeteer";
 import type { Socket } from "socket.io";
 import { OperationManager } from "./OperationManager.js";
 import { getConfig } from "./config.js";
+import { trySolvePressAndHoldChallenge } from "./solvers/pressHoldSolver.js";
 
 export class ResilientMessageHandlers {
   private static config = getConfig();
@@ -47,6 +48,29 @@ export class ResilientMessageHandlers {
           socket.emit("navigated", {
             url: targetUrl,
           });
+
+          try {
+            const pressHoldResult = await trySolvePressAndHoldChallenge(page);
+            if (pressHoldResult.detected) {
+              socket.emit("challenge_status", {
+                type: "press_and_hold",
+                solved: pressHoldResult.solved,
+                reason: pressHoldResult.reason,
+              });
+              if (!pressHoldResult.solved) {
+                console.warn(
+                  `Press & Hold challenge unresolved: ${pressHoldResult.reason ?? "no reason provided"}`
+                );
+              }
+            }
+          } catch (solverError) {
+            console.error(
+              "Press & Hold solver failed:",
+              solverError instanceof Error
+                ? solverError.message
+                : solverError
+            );
+          }
         },
         {
           retries: this.config.navigation.retries,
