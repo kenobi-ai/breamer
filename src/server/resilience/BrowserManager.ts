@@ -186,7 +186,10 @@ export class ResilientBrowserManager {
           `${message.type().substr(0, 3).toUpperCase()} ${message.text()}`
         )
       )
-      .on("pageerror", ({ message }) => console.log(message))
+      .on("pageerror", (error) => {
+        const stack = error?.stack || error?.message || String(error);
+        console.error("[Page Error]", stack);
+      })
       .on("response", (response) =>
         console.log(`${response.status()} ${response.url()}`)
       )
