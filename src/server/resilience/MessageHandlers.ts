@@ -19,6 +19,16 @@ export class ResilientMessageHandlers {
           const targetUrl = url.startsWith("http") ? url : `https://${url}`;
           console.log("Navigating to full URL:", targetUrl);
 
+          const urlsMatch = (currentUrl: string): boolean => {
+            try {
+              const normalize = (raw: string) =>
+                new URL(raw).href.replace(/\/$/, "");
+              return normalize(currentUrl) === normalize(targetUrl);
+            } catch {
+              return false;
+            }
+          };
+
           // Try multiple navigation strategies
           try {
             await OperationManager.withTimeout(
@@ -30,15 +40,22 @@ export class ResilientMessageHandlers {
               `Navigation to ${targetUrl} timed out`
             );
           } catch (firstError) {
-            console.log("Trying alternative navigation strategy...");
-            await OperationManager.withTimeout(
-              page.goto(targetUrl, {
-                waitUntil: "domcontentloaded",
-                timeout: this.config.navigation.fallbackTimeout,
-              }),
-              this.config.navigation.fallbackTimeout + 5000,
-              `Alternative navigation to ${targetUrl} timed out`
-            );
+            const currentUrl = page.url();
+            if (urlsMatch(currentUrl)) {
+              console.warn(
+                `Navigation timeout hit, but page already at ${currentUrl}; skipping fallback`
+              );
+            } else {
+              console.log("Trying alternative navigation strategy...");
+              await OperationManager.withTimeout(
+                page.goto(targetUrl, {
+                  waitUntil: "domcontentloaded",
+                  timeout: this.config.navigation.fallbackTimeout,
+                }),
+                this.config.navigation.fallbackTimeout + 5000,
+                `Alternative navigation to ${targetUrl} timed out`
+              );
+            }
           }
 
           socket.emit("navigation", {
