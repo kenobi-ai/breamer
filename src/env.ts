@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// pokayoke-ignore-file: typescript/no-optional-env -- Optional env vars are the public configuration surface for container/runtime overrides.
+// pokayoke-ignore-file: typescript/no-optional-env -- A few optional env vars are public runtime overrides; core browser sizing is required.
 
 const booleanString = z
   .union([z.boolean(), z.enum(["true", "false"])])
@@ -13,16 +13,12 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   CHROME_DEBUG_PORT: z.coerce.number().int().positive().default(9222),
   HEADLESS: booleanString.default(false),
-  PAGE_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(5 * 60 * 1000),
-  CHROME_HEAP_SIZE_MB: z.coerce.number().int().positive().default(4096),
-  BROWSER_WIDTH: z.coerce.number().int().positive().default(1440),
-  BROWSER_HEIGHT: z.coerce.number().int().positive().default(900),
-  BROWSER_DEVICE_SCALE_FACTOR: z.coerce.number().positive().default(1),
-  BROWSER_LOCALE: z.string().default("en-US,en"),
+  PAGE_TIMEOUT_MS: z.coerce.number().int().positive(),
+  CHROME_HEAP_SIZE_MB: z.coerce.number().int().positive(),
+  BROWSER_WIDTH: z.coerce.number().int().positive(),
+  BROWSER_HEIGHT: z.coerce.number().int().positive(),
+  BROWSER_DEVICE_SCALE_FACTOR: z.coerce.number().positive(),
+  BROWSER_LOCALE: z.string().min(1),
   BROWSER_USER_AGENT: z.string().optional(),
   CHROME_EXECUTABLE_PATH: z.string().optional(),
   PUPPETEER_EXECUTABLE_PATH: z.string().optional(),

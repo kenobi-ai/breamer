@@ -176,19 +176,18 @@ export class BreamerBrowserContainer extends Container<BreamerEnv> {
 
   constructor(ctx: ContainerState, env: BreamerEnv) {
     super(ctx, env);
-    this.sleepAfter = env.BREAMER_SLEEP_AFTER ?? "5m";
+    this.sleepAfter = env.BREAMER_SLEEP_AFTER;
 
     this.envVars = {
       HOST: "0.0.0.0",
       PORT: String(CONTAINER_PORT),
       HEADLESS: "true",
-      PAGE_TIMEOUT_MS: env.BREAMER_PAGE_TIMEOUT_MS ?? "300000",
-      CHROME_HEAP_SIZE_MB: env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096",
-      BROWSER_WIDTH: env.BREAMER_BROWSER_WIDTH ?? "1440",
-      BROWSER_HEIGHT: env.BREAMER_BROWSER_HEIGHT ?? "900",
-      BROWSER_DEVICE_SCALE_FACTOR:
-        env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR ?? "1",
-      BROWSER_LOCALE: env.BREAMER_BROWSER_LOCALE ?? "en-US,en",
+      PAGE_TIMEOUT_MS: env.BREAMER_PAGE_TIMEOUT_MS,
+      CHROME_HEAP_SIZE_MB: env.BREAMER_CHROME_HEAP_SIZE_MB,
+      BROWSER_WIDTH: env.BREAMER_BROWSER_WIDTH,
+      BROWSER_HEIGHT: env.BREAMER_BROWSER_HEIGHT,
+      BROWSER_DEVICE_SCALE_FACTOR: env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR,
+      BROWSER_LOCALE: env.BREAMER_BROWSER_LOCALE,
       CDP_PROXY: "true",
       CDP_PROXY_PATH: "/cdp",
       SHUTDOWN_PATH,
@@ -206,8 +205,8 @@ export class BreamerBrowserContainer extends Container<BreamerEnv> {
     logWorker("container.started", {
       port: CONTAINER_PORT,
       sleepAfter: this.sleepAfter,
-      pageTimeoutMs: this.env.BREAMER_PAGE_TIMEOUT_MS ?? "300000",
-      heapMb: this.env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096",
+      pageTimeoutMs: this.env.BREAMER_PAGE_TIMEOUT_MS,
+      heapMb: this.env.BREAMER_CHROME_HEAP_SIZE_MB,
     });
   }
 
@@ -266,7 +265,7 @@ export default {
       logWorker("worker.health", {
         requestId,
         accessEnabled: Boolean(env.BREAMER_ACCESS_TOKEN),
-        sleepAfter: env.BREAMER_SLEEP_AFTER ?? "5m",
+        sleepAfter: env.BREAMER_SLEEP_AFTER,
       });
 
       return complete(
@@ -278,15 +277,15 @@ export default {
           sessionPath: SESSION_PATH,
           shutdownPath: `${SESSION_PATH}/:sessionId${SHUTDOWN_PATH}`,
           accessEnabled: Boolean(env.BREAMER_ACCESS_TOKEN),
-          pageTimeoutMs: env.BREAMER_PAGE_TIMEOUT_MS ?? "300000",
-          chromeHeapSizeMb: env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096",
+          pageTimeoutMs: env.BREAMER_PAGE_TIMEOUT_MS,
+          chromeHeapSizeMb: env.BREAMER_CHROME_HEAP_SIZE_MB,
           browserSize: {
-            width: env.BREAMER_BROWSER_WIDTH ?? "1440",
-            height: env.BREAMER_BROWSER_HEIGHT ?? "900",
-            deviceScaleFactor: env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR ?? "1",
+            width: env.BREAMER_BROWSER_WIDTH,
+            height: env.BREAMER_BROWSER_HEIGHT,
+            deviceScaleFactor: env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR,
           },
-          browserLocale: env.BREAMER_BROWSER_LOCALE ?? "en-US,en",
-          sleepAfter: env.BREAMER_SLEEP_AFTER ?? "5m",
+          browserLocale: env.BREAMER_BROWSER_LOCALE,
+          sleepAfter: env.BREAMER_SLEEP_AFTER,
         }),
         "worker.health",
       );

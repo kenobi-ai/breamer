@@ -23,7 +23,7 @@ No shared singleton browser. No public root page. No global shutdown button. Eac
 - A session-scoped CDP proxy, so Puppeteer connects through the Worker URL.
 - A returned shutdown URL for that one browser session.
 - A 5 minute container sleep horizon for jobs that fail to clean up.
-- `standard-4` container sizing, 4 GB Chromium heap, broad Linux font coverage, and a 1440x900 default browser window.
+- `standard-4` container sizing, configured Chromium heap/window settings, broad Linux font coverage, and structured browser lifecycle logs.
 - Structured request, session, browser, CDP proxy, auth, health, and shutdown logs across Worker and container.
 
 ## Flow
@@ -154,12 +154,12 @@ Non-secret settings live in `wrangler.jsonc`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `BREAMER_PAGE_TIMEOUT_MS` | `300000` | Idle page cleanup inside the container. |
-| `BREAMER_CHROME_HEAP_SIZE_MB` | `4096` | Chromium V8 heap size. |
-| `BREAMER_BROWSER_WIDTH` | `1440` | Initial browser width. |
-| `BREAMER_BROWSER_HEIGHT` | `900` | Initial browser height. |
-| `BREAMER_BROWSER_DEVICE_SCALE_FACTOR` | `1` | Initial device scale factor. |
-| `BREAMER_BROWSER_LOCALE` | `en-US,en` | Chromium locale. |
+| `BREAMER_PAGE_TIMEOUT_MS` | Required | Idle page cleanup inside the container. |
+| `BREAMER_CHROME_HEAP_SIZE_MB` | Required | Chromium V8 heap size. |
+| `BREAMER_BROWSER_WIDTH` | Required | Initial browser width. |
+| `BREAMER_BROWSER_HEIGHT` | Required | Initial browser height. |
+| `BREAMER_BROWSER_DEVICE_SCALE_FACTOR` | Required | Initial device scale factor. |
+| `BREAMER_BROWSER_LOCALE` | Required | Chromium locale. |
 | `BREAMER_BROWSER_USER_AGENT` | unset | Optional user agent override. |
 | `BREAMER_SLEEP_AFTER` | `5m` | Cloudflare Container sleep horizon. |
 
@@ -206,18 +206,13 @@ For MHTML capture, a good caller sequence is:
 
 ## Docker
 
-Wrangler builds this image automatically, but the raw container can be smoke-tested directly:
+Wrangler builds this image automatically:
 
 ```bash
 docker build -t breamer .
-docker run --rm -p 3000:3000 -e ACCESS_TOKEN=dev-secret breamer
 ```
 
-Then:
-
-```bash
-curl -H "Authorization: Bearer dev-secret" http://localhost:3000/cdp
-```
+If you run the raw container directly, pass the same required container env vars the Worker injects: `PAGE_TIMEOUT_MS`, `CHROME_HEAP_SIZE_MB`, `BROWSER_WIDTH`, `BROWSER_HEIGHT`, `BROWSER_DEVICE_SCALE_FACTOR`, and `BROWSER_LOCALE`.
 
 ## Checks
 

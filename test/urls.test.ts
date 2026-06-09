@@ -9,7 +9,12 @@ import {
 } from "../src/urls.ts";
 
 const env = parseEnv({
-  PAGE_TIMEOUT_MS: 120000,
+  PAGE_TIMEOUT_MS: 1,
+  CHROME_HEAP_SIZE_MB: 1,
+  BROWSER_WIDTH: 1,
+  BROWSER_HEIGHT: 1,
+  BROWSER_DEVICE_SCALE_FACTOR: 1,
+  BROWSER_LOCALE: "test",
 });
 
 test("toWebSocketOrigin converts http schemes", () => {

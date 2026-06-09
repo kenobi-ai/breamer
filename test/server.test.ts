@@ -4,8 +4,19 @@ import { createApp, parseEnv } from "../src/server.ts";
 const fakeBrowserEndpoint =
   "ws://127.0.0.1:9222/devtools/browser/96a96c29-36ad-47da-be46-35249f44dc66";
 
+const testEnv = (overrides: Parameters<typeof parseEnv>[0] = {}) =>
+  parseEnv({
+    PAGE_TIMEOUT_MS: 1,
+    CHROME_HEAP_SIZE_MB: 1,
+    BROWSER_WIDTH: 1,
+    BROWSER_HEIGHT: 1,
+    BROWSER_DEVICE_SCALE_FACTOR: 1,
+    BROWSER_LOCALE: "test",
+    ...overrides,
+  });
+
 test("root endpoint is not exposed", async () => {
-  const app = createApp(parseEnv());
+  const app = createApp(testEnv());
 
   const response = await app.request("/");
   expect(response.status).toBe(404);
@@ -13,7 +24,7 @@ test("root endpoint is not exposed", async () => {
 });
 
 test("health endpoint requires the configured access token", async () => {
-  const app = createApp(parseEnv({ ACCESS_TOKEN: "secret" }));
+  const app = createApp(testEnv({ ACCESS_TOKEN: "secret" }));
 
   const response = await app.request("/health");
   expect(response.status).toBe(401);
@@ -21,7 +32,7 @@ test("health endpoint requires the configured access token", async () => {
 });
 
 test("health endpoint accepts bearer token", async () => {
-  const app = createApp(parseEnv({ ACCESS_TOKEN: "secret" }));
+  const app = createApp(testEnv({ ACCESS_TOKEN: "secret" }));
 
   const response = await app.request("/health", {
     headers: {
@@ -36,7 +47,7 @@ test("health endpoint accepts bearer token", async () => {
 });
 
 test("/cdp requires the configured access token", async () => {
-  const app = createApp(parseEnv({ ACCESS_TOKEN: "secret" }), {
+  const app = createApp(testEnv({ ACCESS_TOKEN: "secret" }), {
     getBrowserEndpoint: () => fakeBrowserEndpoint,
   });
 
@@ -46,7 +57,7 @@ test("/cdp requires the configured access token", async () => {
 });
 
 test("/cdp returns session-scoped websocket and shutdown URLs", async () => {
-  const app = createApp(parseEnv({ ACCESS_TOKEN: "secret" }), {
+  const app = createApp(testEnv({ ACCESS_TOKEN: "secret" }), {
     getBrowserEndpoint: () => fakeBrowserEndpoint,
   });
 
@@ -77,7 +88,7 @@ test("/cdp returns session-scoped websocket and shutdown URLs", async () => {
 
 test("shutdown endpoint requests shutdown without a token", async () => {
   let shutdownRequested = false;
-  const app = createApp(parseEnv(), {
+  const app = createApp(testEnv(), {
     requestShutdown: () => {
       shutdownRequested = true;
     },

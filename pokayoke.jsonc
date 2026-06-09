@@ -12,6 +12,7 @@
   ],
   "ignores": ["dist/**", "node_modules/**", ".wrangler/**"],
   "rules": {
-    "repo/breamer-service-contract": "error"
+    "repo/breamer-service-contract": "error",
+    "repo/docs-match-config": "error"
   }
 }
