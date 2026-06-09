@@ -1,10 +1,11 @@
 import { z } from "zod";
+
 // pokayoke-ignore-file: typescript/no-optional-env -- Optional env vars are the public configuration surface for container/runtime overrides.
 
 const booleanString = z
   .union([z.boolean(), z.enum(["true", "false"])])
   .transform((value): boolean =>
-    typeof value === "boolean" ? value : value === "true"
+    typeof value === "boolean" ? value : value === "true",
   );
 
 const envSchema = z.object({
@@ -12,7 +13,11 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   CHROME_DEBUG_PORT: z.coerce.number().int().positive().default(9222),
   HEADLESS: booleanString.default(false),
-  PAGE_TIMEOUT_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
+  PAGE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 60 * 1000),
   CHROME_HEAP_SIZE_MB: z.coerce.number().int().positive().default(4096),
   BROWSER_WIDTH: z.coerce.number().int().positive().default(1440),
   BROWSER_HEIGHT: z.coerce.number().int().positive().default(900),
@@ -30,14 +35,14 @@ const envSchema = z.object({
     .string()
     .default("/cdp")
     .transform((value) =>
-      value.startsWith("/") ? value.replace(/\/+$/, "") : `/${value}`
+      value.startsWith("/") ? value.replace(/\/+$/, "") : `/${value}`,
     ),
   SHUTDOWN_PATH: z
     .string()
     .default("/shutdown")
     .transform((value) =>
-      value.startsWith("/") ? value.replace(/\/+$/, "") : `/${value}`
-    )
+      value.startsWith("/") ? value.replace(/\/+$/, "") : `/${value}`,
+    ),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -72,6 +77,6 @@ export const parseEnv = (overrides: Partial<Env> = {}): Env => {
       overrides.BROWSER_HOSTNAME ?? process.env.BROWSER_HOSTNAME,
     CDP_PROXY: overrides.CDP_PROXY ?? process.env.CDP_PROXY,
     CDP_PROXY_PATH: overrides.CDP_PROXY_PATH ?? process.env.CDP_PROXY_PATH,
-    SHUTDOWN_PATH: overrides.SHUTDOWN_PATH ?? process.env.SHUTDOWN_PATH
+    SHUTDOWN_PATH: overrides.SHUTDOWN_PATH ?? process.env.SHUTDOWN_PATH,
   });
 };

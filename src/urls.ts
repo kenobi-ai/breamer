@@ -39,7 +39,7 @@ export const inferPublicOrigin = (c: Context, env: Env): string => {
 
 export const buildDirectBrowserEndpoint = (
   localEndpoint: string,
-  env: Env
+  env: Env,
 ): string => {
   if (!env.BROWSER_HOSTNAME) {
     return localEndpoint;
@@ -53,7 +53,7 @@ export const buildDirectBrowserEndpoint = (
 
   return localEndpoint.replace(
     `ws://127.0.0.1:${env.CHROME_DEBUG_PORT}`,
-    `${scheme}://${hostname}`
+    `${scheme}://${hostname}`,
   );
 };
 
@@ -61,7 +61,7 @@ export const buildProxiedBrowserEndpoint = (
   localEndpoint: string,
   publicOrigin: string,
   env: Env,
-  publicCdpPath = env.CDP_PROXY_PATH
+  publicCdpPath = env.CDP_PROXY_PATH,
 ): { wsEndpoint: string; proxyPath: string; localPath: string } => {
   const localPath = new URL(localEndpoint).pathname;
   const normalizedPublicCdpPath = publicCdpPath.startsWith("/")
@@ -73,6 +73,6 @@ export const buildProxiedBrowserEndpoint = (
   return {
     wsEndpoint,
     proxyPath,
-    localPath
+    localPath,
   };
 };

@@ -13,24 +13,26 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
     "@cloudflare/containers": "^0.3.7",
-    "@cloudflare/workers-types": "^4.20260609.1",
+    "@types/bun": "^1.3.14",
     "@types/node": "^22.15.21",
     "@types/ws": "^8.5.13",
+    "knip": "^6.16.1",
     "pokayoke": "^0.0.5",
-    "tsup": "^8.5.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.99.0"
   },
   "scripts": {
-    "build": "tsup",
+    "biome": "biome check .",
+    "biome:fix": "biome check --write .",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "bun run check && wrangler deploy",
     "dry-run": "wrangler deploy --dry-run",
+    "knip": "knip",
     "pokayoke": "pokayoke check",
-    "probe": "bun scripts/probe-cdp.mjs",
-    "test": "bun run build && bun test test/*.test.mjs ./.pokayoke/rules/breamer-service-contract.rule.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
-    "verify": "bun run test && bun run typecheck && bun run pokayoke"
+    "typecheck": "bun run typegen && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "typegen": "WRANGLER_WRITE_LOGS=false wrangler types",
+    "check": "bun run typecheck && bun test && bun run biome && bun run knip && bun run pokayoke"
   }
 }

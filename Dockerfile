@@ -6,13 +6,12 @@ FROM --platform=$BREAMER_TARGETPLATFORM oven/bun:1-debian AS deps
 WORKDIR /app
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --ignore-scripts \
-  && bun install --ignore-scripts --no-save @rollup/rollup-linux-x64-gnu@4.61.1
+RUN bun install --frozen-lockfile --ignore-scripts
 
 FROM deps AS build
-COPY tsconfig.json tsup.config.ts ./
+COPY Dockerfile tsconfig.json tsconfig.worker.json wrangler.jsonc ./
 COPY src ./src
-RUN bun run build
+RUN bun run typecheck
 
 FROM --platform=$BREAMER_TARGETPLATFORM oven/bun:1-debian AS runtime
 WORKDIR /app
@@ -70,7 +69,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production --omit optional --ignore-scripts \
   && rm -rf /root/.bun/install/cache
 
-COPY --from=build /app/dist ./dist
+COPY --from=build /app/src ./src
 
 USER bun
 EXPOSE 3000
@@ -78,4 +77,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD bun -e "const token = process.env.ACCESS_TOKEN; const headers = token ? { authorization: 'Bearer ' + token } : undefined; fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health', { headers }).then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["bun", "dist/container.js"]
+ENTRYPOINT ["bun", "src/server.ts"]

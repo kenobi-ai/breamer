@@ -111,16 +111,6 @@ try {
 }
 ```
 
-Run the CDP smoke probe:
-
-```bash
-BREAMER_ROOT_URL=http://localhost:8787 \
-BREAMER_ACCESS_TOKEN=dev-secret \
-  bun run probe -- --shutdown
-```
-
-The probe fetches `/cdp`, opens a raw CDP WebSocket, sends `Browser.getVersion`, connects with Puppeteer, creates a page, and optionally shuts the session down. It fails fast instead of hanging inside `puppeteer.connect()`.
-
 Do not use Wrangler's temporary `*.trycloudflare.com` tunnel as the CDP parity test. It is fine for HTTP checks, but WebSocket upgrade behavior can differ. Use `http://localhost:8787` locally and a real deployed Worker URL publicly.
 
 ## Deploy
@@ -232,10 +222,12 @@ curl -H "Authorization: Bearer dev-secret" http://localhost:3000/cdp
 ## Checks
 
 ```bash
-bun run verify
+bun run check
 ```
 
-`verify` builds, runs tests, typechecks the Worker and container code, and runs the repo-local pokayoke policy so the service stays private Cloudflare infrastructure.
+`check` regenerates Wrangler Worker types, typechecks the Worker and Bun container code, runs tests, checks formatting/linting with Biome, checks unused files/dependencies with Knip, and runs the repo-local pokayoke policy so the service stays private Cloudflare infrastructure.
+
+There is no separate application build step. Wrangler compiles the Worker for dev/deploy, and the container image runs `src/server.ts` directly on Bun.
 
 ## License
 

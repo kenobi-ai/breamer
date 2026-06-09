@@ -6,17 +6,17 @@
   "compatibility_date": "2026-06-09",
   "observability": {
     "logs": {
-      "enabled": true,
+      "enabled": true
     },
     "traces": {
-      "enabled": true,
-    },
+      "enabled": true
+    }
   },
   "routes": [
     {
       "custom_domain": true,
-      "pattern": "breamer.kenobi.ai",
-    },
+      "pattern": "breamer.kenobi.ai"
+    }
   ],
   "vars": {
     "BREAMER_PAGE_TIMEOUT_MS": "300000",
@@ -25,13 +25,13 @@
     "BREAMER_BROWSER_HEIGHT": "956",
     "BREAMER_BROWSER_DEVICE_SCALE_FACTOR": "1",
     "BREAMER_BROWSER_LOCALE": "en-US,en",
-    "BREAMER_SLEEP_AFTER": "5m",
+    "BREAMER_SLEEP_AFTER": "5m"
   },
   "dev": {
-    "enable_containers": true,
+    "enable_containers": true
   },
   "secrets": {
-    "required": ["BREAMER_ACCESS_TOKEN"],
+    "required": ["BREAMER_ACCESS_TOKEN"]
   },
   "containers": [
     {
@@ -40,21 +40,21 @@
       "image": "./Dockerfile",
       "max_instances": 100,
       "instance_type": "standard-4",
-      "rollout_step_percentage": 100,
-    },
+      "rollout_step_percentage": 100
+    }
   ],
   "durable_objects": {
     "bindings": [
       {
         "name": "BREAMER",
-        "class_name": "BreamerBrowserContainer",
-      },
-    ],
+        "class_name": "BreamerBrowserContainer"
+      }
+    ]
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["BreamerBrowserContainer"],
-    },
-  ],
+      "new_sqlite_classes": ["BreamerBrowserContainer"]
+    }
+  ]
 }

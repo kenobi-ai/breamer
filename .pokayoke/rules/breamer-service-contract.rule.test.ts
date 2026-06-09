@@ -7,15 +7,15 @@ const baseFiles: Record<string, string> = {
     license: "MIT",
     private: true,
     scripts: {
-      build: "tsup",
-      deploy: "wrangler deploy"
-    }
+      start: "bun src/server.ts",
+      deploy: "wrangler deploy",
+    },
   }),
   "README.md": "# breamer\n\nCloudflare Workers service.\n",
-  "Dockerfile":
-    "HEALTHCHECK CMD bun -e \"const token = process.env.ACCESS_TOKEN; const headers = token ? { authorization: 'Bearer ' + token } : undefined;\"\nENTRYPOINT [\"bun\", \"dist/container.js\"]\n",
+  Dockerfile:
+    'HEALTHCHECK CMD bun -e "const token = process.env.ACCESS_TOKEN; const headers = token ? { authorization: \'Bearer \' + token } : undefined;"\nENTRYPOINT ["bun", "src/server.ts"]\n',
   "src/worker.ts":
-    'if (url.pathname === "/" || url.pathname === SHUTDOWN_PATH) return json({ error: "not_found" });\nif (url.pathname === "/_worker/health" || url.pathname === "/health") { authenticateAccess(request, env); }\n'
+    'if (url.pathname === "/" || url.pathname === SHUTDOWN_PATH) return json({ error: "not_found" });\nif (url.pathname === "/_worker/health" || url.pathname === "/health") { authenticateAccess(request, env); }\n',
 };
 
 const runRule = async (files: Record<string, string>) => {
@@ -26,7 +26,7 @@ const runRule = async (files: Record<string, string>) => {
       return Object.keys(files).filter((file) => wanted.includes(file));
     },
     readFile: async (file: string) => files[file] ?? "",
-    root: process.cwd()
+    root: process.cwd(),
   } as RuleContext;
 
   return breamerServiceContract.run(context);
@@ -47,11 +47,11 @@ describe("repo/breamer-service-contract", () => {
         license: "ISC",
         main: "dist/index.js",
         publishConfig: { access: "public" },
-        scripts: { start: "bun dist/cli.js" }
+        scripts: { start: "bun dist/cli.js" },
       }),
       "README.md": "## CLI\n\nnpx breamer\n",
-      "Dockerfile": 'ENTRYPOINT ["bun", "dist/cli.js"]\n',
-      "src/cli.ts": "console.log('old cli')"
+      Dockerfile: 'ENTRYPOINT ["bun", "dist/cli.js"]\n',
+      "src/cli.ts": "console.log('old cli')",
     });
 
     expect(result.findings.length).toBeGreaterThanOrEqual(5);

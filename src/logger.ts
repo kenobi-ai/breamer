@@ -9,7 +9,7 @@ const colors = {
   magenta: "\x1b[35m",
   cyan: "\x1b[36m",
   white: "\x1b[37m",
-  gray: "\x1b[90m"
+  gray: "\x1b[90m",
 } as const;
 
 type Color = keyof typeof colors;
@@ -30,7 +30,7 @@ const timestamp = (): string => {
   const now = new Date();
   return colorize(
     `${now.toISOString().replace("T", " ").replace("Z", "")}`,
-    "gray"
+    "gray",
   );
 };
 
@@ -38,7 +38,7 @@ const levelColors: Record<LogLevel, Color[]> = {
   info: ["white"],
   success: ["green"],
   warn: ["yellow"],
-  error: ["red", "bright"]
+  error: ["red", "bright"],
 };
 
 const methodColors: Record<string, Color[]> = {
@@ -48,7 +48,7 @@ const methodColors: Record<string, Color[]> = {
   PATCH: ["cyan"],
   DELETE: ["red"],
   OPTIONS: ["gray"],
-  HEAD: ["gray"]
+  HEAD: ["gray"],
 };
 
 const statusColor = (status: number): Color[] => {
@@ -103,7 +103,7 @@ const quoteIfNeeded = (value: string): string => {
 
 const formatDetails = (details?: LogDetails): string => {
   const entries = Object.entries(details ?? {}).filter(
-    ([, value]) => value !== undefined
+    ([, value]) => value !== undefined,
   );
 
   if (entries.length === 0) {
@@ -116,7 +116,7 @@ const formatDetails = (details?: LogDetails): string => {
 };
 
 const normalizeDetails = (
-  details?: string | LogDetails
+  details?: string | LogDetails,
 ): LogDetails | undefined => {
   if (details === undefined) {
     return undefined;
@@ -129,12 +129,15 @@ const write = (
   level: LogLevel,
   scope: string,
   event: string,
-  details?: LogDetails
+  details?: LogDetails,
 ): void => {
-  const levelText = colorize(level.toUpperCase().padEnd(7), ...levelColors[level]);
+  const levelText = colorize(
+    level.toUpperCase().padEnd(7),
+    ...levelColors[level],
+  );
   const scopeText = colorize(scope, "cyan");
   const line = `${timestamp()} ${levelText} ${scopeText}.${event}${formatDetails(
-    details
+    details,
   )}`;
 
   if (level === "error") {
@@ -160,17 +163,17 @@ export const logger = {
     path: string,
     status: number,
     durationMs: number,
-    details?: LogDetails
+    details?: LogDetails,
   ) {
     const methodStr = colorize(
       method.padEnd(6),
-      ...(methodColors[method] ?? ["white"])
+      ...(methodColors[method] ?? ["white"]),
     );
     const statusStr = colorize(String(status), ...statusColor(status));
     console.log(
       `${timestamp()} ${methodStr} ${path} ${statusStr} ${formatDuration(
-        durationMs
-      )}${formatDetails(details)}`
+        durationMs,
+      )}${formatDetails(details)}`,
     );
   },
 
@@ -185,7 +188,7 @@ export const logger = {
       event,
       typeof details === "object" && details !== null && !Array.isArray(details)
         ? (details as LogDetails)
-        : normalizeDetails(details === undefined ? undefined : String(details))
+        : normalizeDetails(details === undefined ? undefined : String(details)),
     );
   },
 
@@ -195,7 +198,7 @@ export const logger = {
 
   target(event: string, type: string, url?: string) {
     const shortUrl =
-      url && url.length > 80 ? `${url.slice(0, 77)}...` : url ?? "(blank)";
+      url && url.length > 80 ? `${url.slice(0, 77)}...` : (url ?? "(blank)");
     write("info", "target", event, { type, url: shortUrl });
   },
 
@@ -219,7 +222,5 @@ export const logger = {
           ? undefined
           : { error: String(err) };
     write("error", "app", message, details);
-  }
+  },
 };
-
-export type Logger = typeof logger;

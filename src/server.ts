@@ -1,18 +1,19 @@
+import type { Server } from "node:http";
+import type { Duplex } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 // pokayoke-ignore-file: structure/max-file-lines -- Worker-facing browser orchestration is intentionally kept together while the service surface is still compact.
-import { Hono, type Context } from "hono";
+import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import puppeteer, { type Browser, type Page } from "puppeteer";
 import { WebSocket, WebSocketServer } from "ws";
-import type { Server } from "node:http";
-import type { Duplex } from "node:stream";
 import { pipeWebSockets } from "./cdp-proxy.js";
-import { parseEnv, type Env } from "./env.js";
+import { type Env, parseEnv } from "./env.js";
 import { logger } from "./logger.js";
 import {
   buildDirectBrowserEndpoint,
   buildProxiedBrowserEndpoint,
-  inferPublicOrigin
+  inferPublicOrigin,
 } from "./urls.js";
 
 type AppVariables = {
@@ -34,7 +35,7 @@ const metrics = {
   consoleErrors: 0,
   pageErrors: 0,
   cdpProxyConnections: 0,
-  cdpProxyErrors: 0
+  cdpProxyErrors: 0,
 };
 
 const formatUptime = (ms: number): string => {
@@ -100,11 +101,11 @@ const describeError = (err: unknown): string => {
 const requestLogContext = (c: Context): Record<string, unknown> => ({
   requestId: c.get("requestId" as never),
   sessionId: c.req.header("x-breamer-session-id"),
-  path: c.req.path
+  path: c.req.path,
 });
 
 const headerValue = (
-  value: string | string[] | undefined
+  value: string | string[] | undefined,
 ): string | undefined => (Array.isArray(value) ? value[0] : value);
 
 const launchBrowser = async (env: Env): Promise<Browser> => {
@@ -117,7 +118,7 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
     deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
     locale: env.BROWSER_LOCALE,
     heapMb: env.CHROME_HEAP_SIZE_MB,
-    userAgentOverride: Boolean(env.BROWSER_USER_AGENT)
+    userAgentOverride: Boolean(env.BROWSER_USER_AGENT),
   });
 
   const launchedBrowser = await puppeteer.launch({
@@ -145,8 +146,8 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
       "--disable-component-update",
       ...(env.BROWSER_USER_AGENT
         ? [`--user-agent=${env.BROWSER_USER_AGENT}`]
-        : [])
-    ]
+        : []),
+    ],
   });
 
   browser = launchedBrowser;
@@ -155,7 +156,7 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
     logger.browser("disconnected", {
       pagesCreated: metrics.pagesCreated,
       pagesClosed: metrics.pagesClosed,
-      cdpProxyConnections: metrics.cdpProxyConnections
+      cdpProxyConnections: metrics.cdpProxyConnections,
     });
     if (browser === launchedBrowser) {
       browser = null;
@@ -223,7 +224,7 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
   });
 
   logger.success("Browser ready", {
-    wsEndpoint: launchedBrowser.wsEndpoint()
+    wsEndpoint: launchedBrowser.wsEndpoint(),
   });
 
   return launchedBrowser;
@@ -247,7 +248,7 @@ const installCdpProxy = (server: Server, env: Env): void => {
   server.on("upgrade", (request, socket: Duplex, head) => {
     const requestUrl = new URL(
       request.url ?? "/",
-      `http://${request.headers.host ?? "localhost"}`
+      `http://${request.headers.host ?? "localhost"}`,
     );
     const requestId = headerValue(request.headers["x-breamer-request-id"]);
     const sessionId = headerValue(request.headers["x-breamer-session-id"]);
@@ -258,7 +259,7 @@ const installCdpProxy = (server: Server, env: Env): void => {
         requestId,
         sessionId,
         path: requestUrl.pathname,
-        expectedPrefix: prefix
+        expectedPrefix: prefix,
       });
       socket.destroy();
       return;
@@ -278,7 +279,7 @@ const installCdpProxy = (server: Server, env: Env): void => {
           requestId,
           sessionId,
           path: requestUrl.pathname,
-          targetUrl
+          targetUrl,
         });
         const upstream = new WebSocket(targetUrl);
         upstream.once("open", () => {
@@ -289,7 +290,7 @@ const installCdpProxy = (server: Server, env: Env): void => {
             requestId,
             sessionId,
             code,
-            reason: reason.toString()
+            reason: reason.toString(),
           });
         });
         upstream.once("close", (code, reason) => {
@@ -297,7 +298,7 @@ const installCdpProxy = (server: Server, env: Env): void => {
             requestId,
             sessionId,
             code,
-            reason: reason.toString()
+            reason: reason.toString(),
           });
         });
         pipeWebSockets(client, upstream, {
@@ -305,9 +306,9 @@ const installCdpProxy = (server: Server, env: Env): void => {
             metrics.cdpProxyErrors++;
             logger.error(
               "CDP upstream error",
-              `${targetUrl} ${describeError(err)}`
+              `${targetUrl} ${describeError(err)}`,
             );
-          }
+          },
         });
       });
     })().catch((err) => {
@@ -326,7 +327,7 @@ export interface CreateAppOptions {
 const readRequestToken = (
   c: Context,
   headerName: string,
-  queryName = "token"
+  queryName = "token",
 ): string | undefined => {
   const authorization = c.req.header("authorization");
   if (authorization?.startsWith("Bearer ")) {
@@ -364,7 +365,7 @@ const authenticateAccess = (c: Context, env: Env): Response | undefined => {
   if (!token || !timingSafeEqual(token, env.ACCESS_TOKEN)) {
     logger.warn("access denied", {
       ...requestLogContext(c),
-      tokenProvided: Boolean(token)
+      tokenProvided: Boolean(token),
     });
     return c.json({ error: "unauthorized" }, 401);
   }
@@ -373,7 +374,7 @@ const authenticateAccess = (c: Context, env: Env): Response | undefined => {
 const readPublicPath = (
   c: Context,
   headerName: string,
-  fallbackPath: string
+  fallbackPath: string,
 ): string => {
   const value = c.req.header(headerName) ?? fallbackPath;
   return value.startsWith("/") ? value : `/${value}`;
@@ -386,7 +387,8 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
 
   app.use("*", async (c, next) => {
     const start = performance.now();
-    const requestId = c.req.header("x-breamer-request-id") ?? crypto.randomUUID();
+    const requestId =
+      c.req.header("x-breamer-request-id") ?? crypto.randomUUID();
     const sessionId = c.req.header("x-breamer-session-id");
 
     c.set("requestId", requestId);
@@ -403,8 +405,8 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
       {
         requestId,
         sessionId,
-        userAgent: c.req.header("user-agent")
-      }
+        userAgent: c.req.header("user-agent"),
+      },
     );
   });
 
@@ -426,7 +428,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
       ...requestLogContext(c),
       connected: isConnected,
       openPages: pages.length,
-      uptimeMs
+      uptimeMs,
     });
 
     return c.json({
@@ -435,7 +437,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         connected: isConnected,
         debugPort: env.CHROME_DEBUG_PORT,
         openPages: pages.length,
-        pageTimeoutMs: env.PAGE_TIMEOUT_MS
+        pageTimeoutMs: env.PAGE_TIMEOUT_MS,
       },
       metrics: {
         uptimeMs,
@@ -447,7 +449,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         consoleErrors: metrics.consoleErrors,
         pageErrors: metrics.pageErrors,
         cdpProxyConnections: metrics.cdpProxyConnections,
-        cdpProxyErrors: metrics.cdpProxyErrors
+        cdpProxyErrors: metrics.cdpProxyErrors,
       },
       network: {
         host: env.HOST,
@@ -458,8 +460,8 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         browserHost: env.BROWSER_HOSTNAME ?? null,
         shutdownPath: env.SHUTDOWN_PATH,
         shutdownMode: "session-route",
-        accessEnabled: Boolean(env.ACCESS_TOKEN)
-      }
+        accessEnabled: Boolean(env.ACCESS_TOKEN),
+      },
     });
   });
 
@@ -473,7 +475,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
       await ensureBrowser(env);
       logger.info("ready checked", {
         ...requestLogContext(c),
-        connected: browser?.connected ?? false
+        connected: browser?.connected ?? false,
       });
       return c.json({ status: "ready" });
     } catch (err) {
@@ -496,12 +498,12 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
       const publicCdpPath = readPublicPath(
         c,
         "x-breamer-public-cdp-path",
-        env.CDP_PROXY_PATH
+        env.CDP_PROXY_PATH,
       );
       const publicShutdownPath = readPublicPath(
         c,
         "x-breamer-public-shutdown-path",
-        env.SHUTDOWN_PATH
+        env.SHUTDOWN_PATH,
       );
       const publicOrigin = inferPublicOrigin(c, env);
       const shutdownUrl = new URL(publicShutdownPath, publicOrigin);
@@ -512,14 +514,14 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
           ...requestLogContext(c),
           mode: "direct",
           wsEndpoint,
-          shutdownUrl: shutdownUrl.toString()
+          shutdownUrl: shutdownUrl.toString(),
         });
         return c.json({
           wsEndpoint,
           shutdownUrl: shutdownUrl.toString(),
           ...(sessionId ? { sessionId } : {}),
           mode: "direct",
-          path: new URL(wsEndpoint).pathname
+          path: new URL(wsEndpoint).pathname,
         });
       }
 
@@ -527,7 +529,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         localEndpoint,
         publicOrigin,
         env,
-        publicCdpPath
+        publicCdpPath,
       );
 
       logger.cdp("endpoint issued", {
@@ -537,7 +539,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         wsEndpoint: endpoint.wsEndpoint,
         shutdownUrl: shutdownUrl.toString(),
         proxyPath: endpoint.proxyPath,
-        localPath: endpoint.localPath
+        localPath: endpoint.localPath,
       });
 
       return c.json({
@@ -546,7 +548,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         ...(sessionId ? { sessionId } : {}),
         mode: "proxy",
         path: endpoint.proxyPath,
-        localPath: endpoint.localPath
+        localPath: endpoint.localPath,
       });
     } catch (err) {
       logger.error("Failed to get CDP endpoint", err);
@@ -567,7 +569,7 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
   return app;
 };
 
-export interface StartServerOptions {
+interface StartServerOptions {
   host?: string;
   port?: number;
   chromeDebugPort?: number;
@@ -589,7 +591,7 @@ export interface StartServerOptions {
   shutdownPath?: string;
 }
 
-export const startServer = async (options: StartServerOptions = {}) => {
+const startServer = async (options: StartServerOptions = {}) => {
   const env = parseEnv({
     HOST: options.host,
     PORT: options.port,
@@ -609,7 +611,7 @@ export const startServer = async (options: StartServerOptions = {}) => {
     PUBLIC_ORIGIN: options.publicOrigin,
     CDP_PROXY: options.cdpProxy,
     CDP_PROXY_PATH: options.cdpProxyPath,
-    SHUTDOWN_PATH: options.shutdownPath
+    SHUTDOWN_PATH: options.shutdownPath,
   });
 
   logger.info("breamer container boot", {
@@ -624,7 +626,7 @@ export const startServer = async (options: StartServerOptions = {}) => {
     viewport: `${env.BROWSER_WIDTH}x${env.BROWSER_HEIGHT}`,
     deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
     locale: env.BROWSER_LOCALE,
-    accessEnabled: Boolean(env.ACCESS_TOKEN)
+    accessEnabled: Boolean(env.ACCESS_TOKEN),
   });
 
   let server: Server;
@@ -636,7 +638,7 @@ export const startServer = async (options: StartServerOptions = {}) => {
       pagesCreated: metrics.pagesCreated,
       pagesClosed: metrics.pagesClosed,
       cdpProxyConnections: metrics.cdpProxyConnections,
-      cdpProxyErrors: metrics.cdpProxyErrors
+      cdpProxyErrors: metrics.cdpProxyErrors,
     });
     server.close();
     if (browser) {
@@ -651,7 +653,7 @@ export const startServer = async (options: StartServerOptions = {}) => {
         logger.error("Shutdown failed", err);
         process.exit(1);
       });
-    }
+    },
   });
 
   ensureBrowser(env).catch((err) => {
@@ -661,7 +663,7 @@ export const startServer = async (options: StartServerOptions = {}) => {
   server = serve({
     fetch: app.fetch,
     hostname: env.HOST,
-    port: env.PORT
+    port: env.PORT,
   }) as Server;
 
   if (env.CDP_PROXY) {
@@ -686,5 +688,11 @@ export const startServer = async (options: StartServerOptions = {}) => {
   return { app, env, server };
 };
 
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startServer().catch((error) => {
+    logger.error("Container process failed", error);
+    process.exit(1);
+  });
+}
+
 export { type Env, parseEnv } from "./env.js";
-export { logger } from "./logger.js";

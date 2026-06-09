@@ -12,7 +12,7 @@ export interface PipeWebSocketOptions {
 const sendFrame = (
   socket: WebSocket,
   data: WebSocket.RawData,
-  isBinary: boolean
+  isBinary: boolean,
 ): void => {
   socket.send(data, { binary: isBinary });
 };
@@ -20,7 +20,7 @@ const sendFrame = (
 export const pipeWebSockets = (
   client: WebSocket,
   upstream: WebSocket,
-  options: PipeWebSocketOptions = {}
+  options: PipeWebSocketOptions = {},
 ): void => {
   const pending: PendingFrame[] = [];
 

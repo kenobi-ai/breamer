@@ -8,10 +8,18 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/cdp-proxy.ts",
+    "src/env.ts",
+    "src/logger.ts",
+    "src/server.ts",
+    "src/urls.ts",
+    "test/**/*.test.ts"
+  ]
 }

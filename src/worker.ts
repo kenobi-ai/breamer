@@ -1,22 +1,7 @@
-/// <reference types="@cloudflare/workers-types" />
 // pokayoke-ignore-file: structure/max-file-lines -- The Worker route table is intentionally explicit so the public API stays easy to audit.
 
-import { Container, getContainer } from "@cloudflare/containers";
 import type { StopParams } from "@cloudflare/containers";
-import type { DurableObject } from "cloudflare:workers";
-
-export interface Env {
-  BREAMER: DurableObjectNamespace<BreamerBrowserContainer>;
-  BREAMER_ACCESS_TOKEN?: string;
-  BREAMER_PAGE_TIMEOUT_MS?: string;
-  BREAMER_CHROME_HEAP_SIZE_MB?: string;
-  BREAMER_BROWSER_WIDTH?: string;
-  BREAMER_BROWSER_HEIGHT?: string;
-  BREAMER_BROWSER_DEVICE_SCALE_FACTOR?: string;
-  BREAMER_BROWSER_LOCALE?: string;
-  BREAMER_BROWSER_USER_AGENT?: string;
-  BREAMER_SLEEP_AFTER?: string;
-}
+import { Container, getContainer } from "@cloudflare/containers";
 
 const CONTAINER_PORT = 3000;
 const CDP_PATH = "/cdp";
@@ -24,6 +9,10 @@ const SHUTDOWN_PATH = "/shutdown";
 const SESSION_PATH = "/sessions";
 const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+interface BreamerEnv extends Env {
+  BREAMER_BROWSER_USER_AGENT?: string;
+}
+type ContainerState = DurableObjectState<Record<PropertyKey, never>>;
 type WorkerLogDetails = Record<string, unknown>;
 
 const logWorker = (event: string, details: WorkerLogDetails = {}): void => {
@@ -32,8 +21,8 @@ const logWorker = (event: string, details: WorkerLogDetails = {}): void => {
       timestamp: new Date().toISOString(),
       service: "breamer-worker",
       event,
-      ...details
-    })
+      ...details,
+    }),
   );
 };
 
@@ -42,8 +31,8 @@ const json = (body: unknown, init?: ResponseInit): Response =>
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      ...init?.headers
-    }
+      ...init?.headers,
+    },
   });
 
 const getBearerToken = (request: Request): string | undefined => {
@@ -77,8 +66,8 @@ const timingSafeEqual = (left: string, right: string): boolean => {
 
 const authenticateAccess = (
   request: Request,
-  env: Env,
-  requestId?: string
+  env: BreamerEnv,
+  requestId?: string,
 ): Response | undefined => {
   if (!env.BREAMER_ACCESS_TOKEN) {
     logWorker("auth.missing_secret", { requestId });
@@ -86,9 +75,9 @@ const authenticateAccess = (
       {
         error: "access_disabled",
         message:
-          "Set the BREAMER_ACCESS_TOKEN Worker secret to enable CDP access."
+          "Set the BREAMER_ACCESS_TOKEN Worker secret to enable CDP access.",
       },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
@@ -96,7 +85,7 @@ const authenticateAccess = (
   if (!token || !timingSafeEqual(token, env.BREAMER_ACCESS_TOKEN)) {
     logWorker("auth.denied", {
       requestId,
-      tokenProvided: Boolean(token)
+      tokenProvided: Boolean(token),
     });
     return json({ error: "unauthorized" }, { status: 401 });
   }
@@ -104,11 +93,10 @@ const authenticateAccess = (
 
 const forwardableRequest = (
   request: Request,
-  env: Env,
   options: {
     pathname?: string;
     headers?: Record<string, string>;
-  } = {}
+  } = {},
 ): Request => {
   const url = new URL(request.url);
   if (options.pathname) {
@@ -129,7 +117,7 @@ const forwardableRequest = (
         return typeof parsed.scheme === "string" ? parsed.scheme : undefined;
       } catch (error) {
         logWorker("forwarded_proto_parse_failed", {
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
         return undefined;
       }
@@ -143,7 +131,7 @@ const forwardableRequest = (
   headers.set("x-forwarded-host", url.host);
   headers.set(
     "x-forwarded-proto",
-    incomingProto ?? (isLocalHost ? url.protocol.replace(":", "") : "https")
+    incomingProto ?? (isLocalHost ? url.protocol.replace(":", "") : "https"),
   );
   for (const [name, value] of Object.entries(options.headers ?? {})) {
     headers.set(name, value);
@@ -156,14 +144,14 @@ const forwardableRequest = (
       request.method === "GET" || request.method === "HEAD"
         ? undefined
         : request.body,
-    redirect: request.redirect
+    redirect: request.redirect,
   });
 };
 
 const createSessionId = (): string => crypto.randomUUID();
 
 const parseSessionRoute = (
-  pathname: string
+  pathname: string,
 ): { sessionId: string; sessionPath: string } | undefined => {
   if (!pathname.startsWith(`${SESSION_PATH}/`)) {
     return undefined;
@@ -176,17 +164,17 @@ const parseSessionRoute = (
 
   return {
     sessionId,
-    sessionPath: `/${rest.join("/")}`.replace(/\/+$/, "") || "/"
+    sessionPath: `/${rest.join("/")}`.replace(/\/+$/, "") || "/",
   };
 };
 
-export class BreamerBrowserContainer extends Container<Env> {
+export class BreamerBrowserContainer extends Container<BreamerEnv> {
   defaultPort = CONTAINER_PORT;
   requiredPorts = [CONTAINER_PORT];
   sleepAfter = "5m";
   enableInternet = true;
 
-  constructor(ctx: DurableObject["ctx"], env: Env) {
+  constructor(ctx: ContainerState, env: BreamerEnv) {
     super(ctx, env);
     this.sleepAfter = env.BREAMER_SLEEP_AFTER ?? "5m";
 
@@ -210,7 +198,7 @@ export class BreamerBrowserContainer extends Container<Env> {
         : {}),
       ...(env.BREAMER_BROWSER_USER_AGENT
         ? { BROWSER_USER_AGENT: env.BREAMER_BROWSER_USER_AGENT }
-        : {})
+        : {}),
     };
   }
 
@@ -219,7 +207,7 @@ export class BreamerBrowserContainer extends Container<Env> {
       port: CONTAINER_PORT,
       sleepAfter: this.sleepAfter,
       pageTimeoutMs: this.env.BREAMER_PAGE_TIMEOUT_MS ?? "300000",
-      heapMb: this.env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096"
+      heapMb: this.env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096",
     });
   }
 
@@ -233,8 +221,8 @@ export class BreamerBrowserContainer extends Container<Env> {
         timestamp: new Date().toISOString(),
         service: "breamer-worker",
         event: "container.error",
-        error: error instanceof Error ? error.message : String(error)
-      })
+        error: error instanceof Error ? error.message : String(error),
+      }),
     );
     throw error;
   }
@@ -243,8 +231,8 @@ export class BreamerBrowserContainer extends Container<Env> {
 export default {
   async fetch(
     request: Request,
-    env: Env,
-    ctx: ExecutionContext
+    env: BreamerEnv,
+    ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
     const requestId =
@@ -257,13 +245,16 @@ export default {
         method: request.method,
         path: url.pathname,
         status: response.status,
-        durationMs: Math.round(performance.now() - startedAt)
+        durationMs: Math.round(performance.now() - startedAt),
       });
       return response;
     };
 
     if (url.pathname === "/" || url.pathname === SHUTDOWN_PATH) {
-      return complete(json({ error: "not_found" }, { status: 404 }), "not_found");
+      return complete(
+        json({ error: "not_found" }, { status: 404 }),
+        "not_found",
+      );
     }
 
     if (url.pathname === "/_worker/health" || url.pathname === "/health") {
@@ -275,28 +266,30 @@ export default {
       logWorker("worker.health", {
         requestId,
         accessEnabled: Boolean(env.BREAMER_ACCESS_TOKEN),
-        sleepAfter: env.BREAMER_SLEEP_AFTER ?? "5m"
+        sleepAfter: env.BREAMER_SLEEP_AFTER ?? "5m",
       });
 
-      return complete(json({
-        status: "ok",
-        service: "breamer-worker",
-        container: "BreamerBrowserContainer",
-        cdpPath: CDP_PATH,
-        sessionPath: SESSION_PATH,
-        shutdownPath: `${SESSION_PATH}/:sessionId${SHUTDOWN_PATH}`,
-        accessEnabled: Boolean(env.BREAMER_ACCESS_TOKEN),
-        pageTimeoutMs: env.BREAMER_PAGE_TIMEOUT_MS ?? "300000",
-        chromeHeapSizeMb: env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096",
-        browserSize: {
-          width: env.BREAMER_BROWSER_WIDTH ?? "1440",
-          height: env.BREAMER_BROWSER_HEIGHT ?? "900",
-          deviceScaleFactor:
-            env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR ?? "1"
-        },
-        browserLocale: env.BREAMER_BROWSER_LOCALE ?? "en-US,en",
-        sleepAfter: env.BREAMER_SLEEP_AFTER ?? "5m"
-      }), "worker.health");
+      return complete(
+        json({
+          status: "ok",
+          service: "breamer-worker",
+          container: "BreamerBrowserContainer",
+          cdpPath: CDP_PATH,
+          sessionPath: SESSION_PATH,
+          shutdownPath: `${SESSION_PATH}/:sessionId${SHUTDOWN_PATH}`,
+          accessEnabled: Boolean(env.BREAMER_ACCESS_TOKEN),
+          pageTimeoutMs: env.BREAMER_PAGE_TIMEOUT_MS ?? "300000",
+          chromeHeapSizeMb: env.BREAMER_CHROME_HEAP_SIZE_MB ?? "4096",
+          browserSize: {
+            width: env.BREAMER_BROWSER_WIDTH ?? "1440",
+            height: env.BREAMER_BROWSER_HEIGHT ?? "900",
+            deviceScaleFactor: env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR ?? "1",
+          },
+          browserLocale: env.BREAMER_BROWSER_LOCALE ?? "en-US,en",
+          sleepAfter: env.BREAMER_SLEEP_AFTER ?? "5m",
+        }),
+        "worker.health",
+      );
     }
 
     if (url.pathname === CDP_PATH) {
@@ -314,19 +307,19 @@ export default {
         requestId,
         sessionId,
         publicCdpPath,
-        publicShutdownPath
+        publicShutdownPath,
       });
 
       const response = await container.fetch(
-        forwardableRequest(request, env, {
+        forwardableRequest(request, {
           pathname: CDP_PATH,
           headers: {
             "x-breamer-request-id": requestId,
             "x-breamer-session-id": sessionId,
             "x-breamer-public-cdp-path": publicCdpPath,
-            "x-breamer-public-shutdown-path": publicShutdownPath
-          }
-        })
+            "x-breamer-public-shutdown-path": publicShutdownPath,
+          },
+        }),
       );
       return complete(response, "session.create");
     }
@@ -339,20 +332,20 @@ export default {
       if (sessionPath === SHUTDOWN_PATH) {
         logWorker("session.shutdown", { requestId, sessionId });
         const response = await container.fetch(
-          forwardableRequest(request, env, {
+          forwardableRequest(request, {
             pathname: SHUTDOWN_PATH,
             headers: {
               "x-breamer-request-id": requestId,
-              "x-breamer-session-id": sessionId
-            }
-          })
+              "x-breamer-session-id": sessionId,
+            },
+          }),
         );
 
         if (response.ok) {
           ctx.waitUntil(
             container.stop("SIGTERM").catch((error) => {
               console.error("Failed to stop Breamer browser container", error);
-            })
+            }),
           );
         }
 
@@ -375,18 +368,18 @@ export default {
         logWorker("session.forward", {
           requestId,
           sessionId,
-          sessionPath
+          sessionPath,
         });
         const response = await container.fetch(
-          forwardableRequest(request, env, {
+          forwardableRequest(request, {
             pathname: sessionPath,
             headers: {
               "x-breamer-request-id": requestId,
               "x-breamer-session-id": sessionId,
               "x-breamer-public-cdp-path": `${SESSION_PATH}/${sessionId}${CDP_PATH}`,
-              "x-breamer-public-shutdown-path": `${SESSION_PATH}/${sessionId}${SHUTDOWN_PATH}`
-            }
-          })
+              "x-breamer-public-shutdown-path": `${SESSION_PATH}/${sessionId}${SHUTDOWN_PATH}`,
+            },
+          }),
         );
         return complete(response, "session.forward");
       }
@@ -398,15 +391,19 @@ export default {
         return complete(authResponse, "worker.ready");
       }
 
-      return complete(json(
-        {
-          error: "session_required",
-          message: "Use /cdp to create a session, then call /sessions/:sessionId/ready."
-        },
-        { status: 400 }
-      ), "worker.ready");
+      return complete(
+        json(
+          {
+            error: "session_required",
+            message:
+              "Use /cdp to create a session, then call /sessions/:sessionId/ready.",
+          },
+          { status: 400 },
+        ),
+        "worker.ready",
+      );
     }
 
     return complete(json({ error: "not_found" }, { status: 404 }), "not_found");
-  }
+  },
 };
