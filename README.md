@@ -1,28 +1,236 @@
-> Btw -- pretty much all of this repo was written by an LLM
-> Here be 🐉s!!!
+<p align="center">
+  <img src="./assets/breamer-logo.jpg" alt="Breamer logo" width="720">
+</p>
 
-# BreamerVision™ - High-Fidelity Browser Streaming
+# breamer
 
-Experimental browser streaming service using Puppeteer's CDP Screencast API.
+Fresh Chromium containers on Cloudflare, exposed as long-lived Puppeteer-compatible CDP sessions.
 
-## Quick Start
+Breamer gives you a self-contained browser environment for remote automation. Send one authenticated request to the Worker, get back a WebSocket endpoint, connect with Puppeteer, then call the returned shutdown URL when the job is finished.
 
-```bash
-pnpm install
-pnpm dev
+No shared singleton browser. No public root page. No global shutdown button. Each authorized `/cdp` request gets its own named Cloudflare Container session.
+
+## What It Ships
+
+- A Cloudflare Worker that authenticates session creation.
+- A Cloudflare Container running Bun, Hono, Puppeteer, and system Chromium.
+- A session-scoped CDP proxy, so Puppeteer connects through the Worker URL.
+- A returned shutdown URL for that one browser session.
+- A 5 minute container sleep horizon for jobs that fail to clean up.
+- `standard-4` container sizing, 4 GB Chromium heap, broad Linux font coverage, and a 1440x900 default browser window.
+- Structured request, session, browser, CDP proxy, auth, health, and shutdown logs across Worker and container.
+
+## Flow
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Worker
+  participant Container
+  participant Chromium
+
+  Caller->>Worker: GET /cdp + bearer token
+  Worker->>Container: start named session container
+  Container->>Chromium: launch or verify browser
+  Container-->>Caller: wsEndpoint + shutdownUrl + sessionId
+  Caller->>Worker: Puppeteer connects to /sessions/:id/cdp/...
+  Worker->>Container: proxy CDP WebSocket
+  Container->>Chromium: proxy CDP frames
+  Caller->>Worker: POST returned shutdownUrl
+  Worker->>Container: shutdown that session
 ```
 
-Visit http://localhost:3000 to see the BreamerVision™ interface.
+## Local Parity
 
-## Architecture
+Local development uses Wrangler plus the same Dockerfile Cloudflare deploys.
 
-- **Backend**: Puppeteer with Chrome DevTools Protocol for screencasting
-- **Frontend**: React with real-time canvas rendering
-- **Connection**: WebSocket for low-latency frame streaming
+```bash
+bun install
+cp .dev.vars.example .dev.vars
+bun run dev
+```
 
-## Features
+Wrangler usually serves the Worker at `http://localhost:8787`.
 
-- Real-time browser streaming with CDP Screencast API
-- Interactive viewport with click and scroll support
-- Simple address bar navigation
-- ~80-200ms latency (local network)
+Fetch a browser session:
+
+```bash
+curl -H "Authorization: Bearer dev-secret" http://localhost:8787/cdp
+```
+
+Response:
+
+```json
+{
+  "wsEndpoint": "ws://localhost:8787/sessions/00382bb3-25dd-433c-bce4-495dd0438ea2/cdp/devtools/browser/96a96c29-36ad-47da-be46-35249f44dc66",
+  "shutdownUrl": "http://localhost:8787/sessions/00382bb3-25dd-433c-bce4-495dd0438ea2/shutdown",
+  "sessionId": "00382bb3-25dd-433c-bce4-495dd0438ea2",
+  "mode": "proxy",
+  "path": "/sessions/00382bb3-25dd-433c-bce4-495dd0438ea2/cdp/devtools/browser/96a96c29-36ad-47da-be46-35249f44dc66",
+  "localPath": "/devtools/browser/96a96c29-36ad-47da-be46-35249f44dc66"
+}
+```
+
+Connect from Puppeteer:
+
+```ts
+import puppeteer from "puppeteer";
+
+const response = await fetch(`${process.env.BREAMER_ROOT_URL}/cdp`, {
+  headers: {
+    Authorization: `Bearer ${process.env.BREAMER_ACCESS_TOKEN}`
+  }
+});
+
+if (!response.ok) {
+  throw new Error(await response.text());
+}
+
+const { wsEndpoint, shutdownUrl } = await response.json() as {
+  wsEndpoint: string;
+  shutdownUrl: string;
+};
+
+const browser = await puppeteer.connect({
+  browserWSEndpoint: wsEndpoint,
+  defaultViewport: null
+});
+
+try {
+  const page = await browser.newPage();
+  await page.goto("https://example.com", { waitUntil: "networkidle0" });
+} finally {
+  browser.disconnect();
+  await fetch(shutdownUrl, { method: "POST" });
+}
+```
+
+Run the CDP smoke probe:
+
+```bash
+BREAMER_ROOT_URL=http://localhost:8787 \
+BREAMER_ACCESS_TOKEN=dev-secret \
+  bun run probe -- --shutdown
+```
+
+The probe fetches `/cdp`, opens a raw CDP WebSocket, sends `Browser.getVersion`, connects with Puppeteer, creates a page, and optionally shuts the session down. It fails fast instead of hanging inside `puppeteer.connect()`.
+
+Do not use Wrangler's temporary `*.trycloudflare.com` tunnel as the CDP parity test. It is fine for HTTP checks, but WebSocket upgrade behavior can differ. Use `http://localhost:8787` locally and a real deployed Worker URL publicly.
+
+## Deploy
+
+Set the Worker secret:
+
+```bash
+bunx wrangler secret put BREAMER_ACCESS_TOKEN
+```
+
+Deploy:
+
+```bash
+bun run deploy
+```
+
+Dry run the Worker and container build:
+
+```bash
+bun run dry-run
+```
+
+`wrangler.jsonc` pins this project to Cloudflare account `6f735f3e89aec8751cf8ad7ed37cae12` and custom domain `breamer.kenobi.ai`.
+
+## API
+
+| Endpoint | Auth | Description |
+| --- | --- | --- |
+| `GET /cdp` or `POST /cdp` | Bearer token | Creates a fresh named container session and returns `wsEndpoint`, `shutdownUrl`, and `sessionId`. |
+| `GET /sessions/:sessionId/cdp/...` | Session URL possession | CDP WebSocket route used by Puppeteer. |
+| `POST /sessions/:sessionId/shutdown` | Session URL possession | Stops that specific browser container. |
+| `GET /health` or `GET /_worker/health` | Bearer token | Worker health/config check. Does not wake a container. |
+| `GET /sessions/:sessionId/health` | Bearer token | Container health check. |
+| `GET /sessions/:sessionId/ready` | Bearer token | Verifies Chromium is ready inside that session. |
+
+`/` intentionally returns `404`.
+
+## Configuration
+
+Non-secret settings live in `wrangler.jsonc`.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `BREAMER_PAGE_TIMEOUT_MS` | `300000` | Idle page cleanup inside the container. |
+| `BREAMER_CHROME_HEAP_SIZE_MB` | `4096` | Chromium V8 heap size. |
+| `BREAMER_BROWSER_WIDTH` | `1440` | Initial browser width. |
+| `BREAMER_BROWSER_HEIGHT` | `900` | Initial browser height. |
+| `BREAMER_BROWSER_DEVICE_SCALE_FACTOR` | `1` | Initial device scale factor. |
+| `BREAMER_BROWSER_LOCALE` | `en-US,en` | Chromium locale. |
+| `BREAMER_BROWSER_USER_AGENT` | unset | Optional user agent override. |
+| `BREAMER_SLEEP_AFTER` | `5m` | Cloudflare Container sleep horizon. |
+
+Secret:
+
+```bash
+BREAMER_ACCESS_TOKEN=<long random token>
+```
+
+Shutdown URLs do not require the bearer token. They are high-entropy session capabilities returned only from an authorized `/cdp` call.
+
+## Logging
+
+Worker logs are structured JSON with `requestId`, route, status, duration, session ID, and container lifecycle events.
+
+Container logs include:
+
+- boot configuration
+- request method/path/status/duration
+- auth failures
+- session ID and request ID
+- browser launch and disconnects
+- target/page lifecycle
+- console errors and page errors
+- CDP proxy connect/open/close/error
+- endpoint issuance
+- readiness, health, and shutdown
+
+The Worker forwards `x-breamer-request-id` into the container, so a single job can be followed across both layers.
+
+## Archive Quality Notes
+
+Breamer starts a strong default browser, but callers still own page-specific capture correctness. Before `Page.captureSnapshot`, set the exact viewport, user agent, locale/media, and wait policy your archive needs.
+
+For MHTML capture, a good caller sequence is:
+
+1. Connect with `defaultViewport: null`.
+2. Create a page and set the viewport you want.
+3. Set user agent and extra headers if the target site is sensitive to them.
+4. Navigate with a settled wait strategy.
+5. Wait for fonts and late layout work.
+6. Capture MHTML.
+7. Call the returned shutdown URL.
+
+## Docker
+
+Wrangler builds this image automatically, but the raw container can be smoke-tested directly:
+
+```bash
+docker build -t breamer .
+docker run --rm -p 3000:3000 -e ACCESS_TOKEN=dev-secret breamer
+```
+
+Then:
+
+```bash
+curl -H "Authorization: Bearer dev-secret" http://localhost:3000/cdp
+```
+
+## Checks
+
+```bash
+bun run verify
+```
+
+`verify` builds, runs tests, typechecks the Worker and container code, and runs the repo-local pokayoke policy so the service stays private Cloudflare infrastructure.
+
+## License
+
+MIT

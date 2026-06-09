@@ -1,6 +1,8 @@
-node_modules
-dist
-.env
-.env.local
-.DS_Store
+dist/
+node_modules/
+coverage/
+.wrangler/
 *.log
+.env
+.dev.vars
+.DS_Store

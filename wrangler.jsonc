@@ -1,0 +1,58 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "breamer",
+  "account_id": "6f735f3e89aec8751cf8ad7ed37cae12",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-09",
+  "observability": {
+    "logs": {},
+    "traces": {
+      "enabled": true,
+    },
+  },
+  "routes": [
+    {
+      "custom_domain": true,
+      "pattern": "breamer.kenobi.ai",
+    },
+  ],
+  "vars": {
+    "BREAMER_PAGE_TIMEOUT_MS": "300000",
+    "BREAMER_CHROME_HEAP_SIZE_MB": "4096",
+    "BREAMER_BROWSER_WIDTH": "1440",
+    "BREAMER_BROWSER_HEIGHT": "900",
+    "BREAMER_BROWSER_DEVICE_SCALE_FACTOR": "1",
+    "BREAMER_BROWSER_LOCALE": "en-US,en",
+    "BREAMER_SLEEP_AFTER": "5m",
+  },
+  "dev": {
+    "enable_containers": true,
+  },
+  "secrets": {
+    "required": ["BREAMER_ACCESS_TOKEN"],
+  },
+  "containers": [
+    {
+      "name": "breamer-browser-container",
+      "class_name": "BreamerContainer",
+      "image": "./Dockerfile",
+      "max_instances": 100,
+      "instance_type": "standard-4",
+      "rollout_step_percentage": 100,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BREAMER",
+        "class_name": "BreamerContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BreamerContainer"],
+    },
+  ],
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/pokayoke/schema.json",
+  "extends": [
+    "pokayoke/recommended",
+    "pokayoke/typescript/recommended"
+  ],
+  "localRules": [
+    ".pokayoke/rules/**/*.rule.ts"
+  ],
+  "files": [
+    "Dockerfile",
+    "README.md",
+    "package.json",
+    "wrangler.jsonc",
+    "src/**/*.ts",
+    ".pokayoke/rules/**/*.ts"
+  ],
+  "ignores": [
+    "dist/**",
+    "node_modules/**",
+    ".wrangler/**"
+  ],
+  "rules": {
+    "repo/breamer-service-contract": "error"
+  }
+}
