@@ -34,7 +34,7 @@
   "containers": [
     {
       "name": "breamer-browser-container",
-      "class_name": "BreamerContainer",
+      "class_name": "BreamerBrowserContainer",
       "image": "./Dockerfile",
       "max_instances": 100,
       "instance_type": "standard-4",
@@ -45,14 +45,14 @@
     "bindings": [
       {
         "name": "BREAMER",
-        "class_name": "BreamerContainer",
+        "class_name": "BreamerBrowserContainer",
       },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["BreamerContainer"],
+      "new_sqlite_classes": ["BreamerBrowserContainer"],
     },
   ],
 }

@@ -6,7 +6,7 @@ import type { StopParams } from "@cloudflare/containers";
 import type { DurableObject } from "cloudflare:workers";
 
 export interface Env {
-  BREAMER: DurableObjectNamespace<BreamerContainer>;
+  BREAMER: DurableObjectNamespace<BreamerBrowserContainer>;
   BREAMER_ACCESS_TOKEN?: string;
   BREAMER_PAGE_TIMEOUT_MS?: string;
   BREAMER_CHROME_HEAP_SIZE_MB?: string;
@@ -180,7 +180,7 @@ const parseSessionRoute = (
   };
 };
 
-export class BreamerContainer extends Container<Env> {
+export class BreamerBrowserContainer extends Container<Env> {
   defaultPort = CONTAINER_PORT;
   requiredPorts = [CONTAINER_PORT];
   sleepAfter = "5m";
@@ -281,7 +281,7 @@ export default {
       return complete(json({
         status: "ok",
         service: "breamer-worker",
-        container: "BreamerContainer",
+        container: "BreamerBrowserContainer",
         cdpPath: CDP_PATH,
         sessionPath: SESSION_PATH,
         shutdownPath: `${SESSION_PATH}/:sessionId${SHUTDOWN_PATH}`,
@@ -351,7 +351,7 @@ export default {
         if (response.ok) {
           ctx.waitUntil(
             container.stop("SIGTERM").catch((error) => {
-              console.error("Failed to stop Breamer container", error);
+              console.error("Failed to stop Breamer browser container", error);
             })
           );
         }
