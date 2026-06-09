@@ -5,7 +5,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-06-09",
   "observability": {
-    "logs": {},
+    "logs": {
+      "enabled": true,
+    },
     "traces": {
       "enabled": true,
     },
