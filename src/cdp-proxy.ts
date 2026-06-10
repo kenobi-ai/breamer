@@ -422,15 +422,224 @@ const buildArchiveSettleExpression = (
 
         return { canvases, videos };
       };
+      const readBlobAsDataUrl = (blob: Blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener("load", () => resolve(String(reader.result)));
+          reader.addEventListener("error", () =>
+            reject(reader.error ?? new Error("Failed to read font blob")),
+          );
+          reader.readAsDataURL(blob);
+        });
+      const collectFontFaceBlocks = (cssText: string, baseUrl: string) => {
+        const blocks: Array<{ baseUrl: string; cssText: string }> = [];
 
-      const fontsReady = document.fonts?.ready ?? Promise.resolve();
+        for (const match of cssText.matchAll(/@font-face\s*{[^}]*}/gi)) {
+          if (match[0]) {
+            blocks.push({ baseUrl, cssText: match[0] });
+          }
+        }
+
+        return blocks;
+      };
+      const inlineFontFaces = async () => {
+        const result = {
+          bytes: 0,
+          failed: 0,
+          fontFaceCount: 0,
+          inlined: 0,
+          styleSheetCount: 0,
+        };
+        const maxFontBytes = 12 * 1024 * 1024;
+        const maxTotalBytes = 48 * 1024 * 1024;
+        const fontCache = new Map<string, Promise<string | undefined>>();
+        const fontFaceBlocks: Array<{ baseUrl: string; cssText: string }> = [];
+
+        const readStyleSheet = async (styleSheet: CSSStyleSheet) => {
+          const baseUrl = styleSheet.href ?? document.baseURI;
+
+          try {
+            const cssText = Array.from(styleSheet.cssRules)
+              .map((rule) => rule.cssText)
+              .join("\n");
+            fontFaceBlocks.push(...collectFontFaceBlocks(cssText, baseUrl));
+            return;
+          } catch (error) {
+            void error;
+          }
+
+          if (!styleSheet.href || remainingMs() < 150) {
+            return;
+          }
+
+          try {
+            const response = await fetch(styleSheet.href, {
+              cache: "force-cache",
+              credentials: "include",
+            });
+            if (!response.ok) {
+              result.failed++;
+              return;
+            }
+
+            fontFaceBlocks.push(
+              ...collectFontFaceBlocks(await response.text(), baseUrl),
+            );
+          } catch (error) {
+            void error;
+            result.failed++;
+          }
+        };
+
+        for (const styleSheet of Array.from(document.styleSheets)) {
+          if (remainingMs() < 150) {
+            break;
+          }
+
+          result.styleSheetCount++;
+          await readStyleSheet(styleSheet);
+        }
+
+        result.fontFaceCount = fontFaceBlocks.length;
+
+        const fetchFontAsDataUrl = (
+          rawUrl: string,
+          baseUrl: string,
+        ): Promise<string | undefined> => {
+          const trimmed = rawUrl.trim();
+          if (/^(?:data:|blob:|about:|#)/i.test(trimmed)) {
+            return Promise.resolve(trimmed);
+          }
+
+          let href: string;
+          try {
+            href = new URL(trimmed, baseUrl).href;
+          } catch (error) {
+            void error;
+            result.failed++;
+            return Promise.resolve(undefined);
+          }
+
+          const cached = fontCache.get(href);
+          if (cached) {
+            return cached;
+          }
+
+          const promise = (async () => {
+            if (remainingMs() < 150 || result.bytes >= maxTotalBytes) {
+              return undefined;
+            }
+
+            try {
+              const response = await fetch(href, {
+                cache: "force-cache",
+                credentials: "include",
+              });
+              if (!response.ok) {
+                result.failed++;
+                return undefined;
+              }
+
+              const blob = await response.blob();
+              if (
+                blob.size <= 0 ||
+                blob.size > maxFontBytes ||
+                result.bytes + blob.size > maxTotalBytes
+              ) {
+                result.failed++;
+                return undefined;
+              }
+
+              result.bytes += blob.size;
+              return await readBlobAsDataUrl(blob);
+            } catch (error) {
+              void error;
+              result.failed++;
+              return undefined;
+            }
+          })();
+
+          fontCache.set(href, promise);
+          return promise;
+        };
+
+        const inlineUrlsInCss = async (
+          cssText: string,
+          baseUrl: string,
+        ): Promise<string | undefined> => {
+          const pieces: string[] = [];
+          let cursor = 0;
+          let changed = false;
+
+          for (const match of cssText.matchAll(
+            /url\(\s*(['"]?)(.*?)\1\s*\)/gi,
+          )) {
+            if (typeof match.index !== "number") {
+              continue;
+            }
+
+            pieces.push(cssText.slice(cursor, match.index));
+            const dataUrl = await fetchFontAsDataUrl(match[2] ?? "", baseUrl);
+            if (dataUrl) {
+              pieces.push(`url("${dataUrl}")`);
+              changed = true;
+              result.inlined++;
+            } else {
+              pieces.push(match[0] ?? "");
+            }
+            cursor = match.index + (match[0]?.length ?? 0);
+          }
+
+          if (!changed) {
+            return undefined;
+          }
+
+          pieces.push(cssText.slice(cursor));
+          return pieces.join("");
+        };
+
+        const inlinedRules: string[] = [];
+        for (const block of fontFaceBlocks) {
+          if (remainingMs() < 150) {
+            break;
+          }
+
+          const inlined = await inlineUrlsInCss(block.cssText, block.baseUrl);
+          if (inlined) {
+            inlinedRules.push(inlined);
+          }
+        }
+
+        if (inlinedRules.length > 0) {
+          const style = document.createElement("style");
+          style.setAttribute("data-breamer-fonts-inlined", "true");
+          style.textContent = inlinedRules.join("\n");
+          document.head.appendChild(style);
+          document.body?.getBoundingClientRect();
+
+          await Promise.race([
+            document.fonts?.ready ?? Promise.resolve(),
+            delay(Math.min(1000, Math.max(1, remainingMs()))),
+          ]);
+        }
+
+        return result;
+      };
+
+      const initialFontsReady = document.fonts?.ready ?? Promise.resolve();
       const lateLayoutFloor = delay(250);
 
       await Promise.race([
-        Promise.allSettled([waitForDomReady(), fontsReady, lateLayoutFloor]),
+        Promise.allSettled([
+          waitForDomReady(),
+          initialFontsReady,
+          lateLayoutFloor,
+        ]),
         delay(Math.min(maxWaitMs, Math.max(100, maxWaitMs * 0.4))),
       ]);
 
+      const fonts = await inlineFontFaces();
+      const fontsReady = document.fonts?.ready ?? Promise.resolve();
       const lazyScroll = await loadLazyContent();
       const cssImageUrls = collectCssImageUrls();
       const imagesReady = Promise.allSettled(collectImages().map(waitForImage));
@@ -454,6 +663,7 @@ const buildArchiveSettleExpression = (
         readyState: document.readyState,
         cssImageCount: cssImageUrls.length,
         imageCount: collectImages().length,
+        fonts,
         lazyScroll,
         rasterized,
       };

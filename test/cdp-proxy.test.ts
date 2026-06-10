@@ -263,6 +263,10 @@ test("CDP proxy settles pages before captureSnapshot", async () => {
   expect(settleCommand.params.expression).toContain("::before");
   expect(settleCommand.params.expression).toContain("mask-image");
   expect(settleCommand.params.expression).toContain("fetchPriority");
+  expect(settleCommand.params.expression).toContain(
+    "data-breamer-fonts-inlined",
+  );
+  expect(settleCommand.params.expression).toContain("@font-face");
 
   upstream.emit(
     "message",
