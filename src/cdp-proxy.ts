@@ -578,6 +578,7 @@ export const pipeWebSockets = (
   const pending: PendingFrame[] = [];
   const internalCommands = new Map<string, InternalCommand>();
   const defaultedPageSessionIds = new Set<string>();
+  const defaultingPageSessionIds = new Map<string, Promise<void>>();
   const pageSessionIds = new Set<string>();
   const suppressedInternalIds = new Set<string>();
   const settleBeforeCaptureSnapshot =
@@ -795,7 +796,7 @@ export const pipeWebSockets = (
     return commands;
   };
 
-  const applyRenderingDefaults = async (
+  const applyRenderingDefaultsOnce = async (
     sessionId: string,
     reason: CdpRenderingDefaultsDetails["reason"],
   ): Promise<void> => {
@@ -804,6 +805,26 @@ export const pipeWebSockets = (
       return;
     }
 
+    const inFlight = defaultingPageSessionIds.get(sessionId);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+
+    const promise = applyRenderingDefaults(sessionId, reason, defaults).finally(
+      () => {
+        defaultingPageSessionIds.delete(sessionId);
+      },
+    );
+    defaultingPageSessionIds.set(sessionId, promise);
+    await promise;
+  };
+
+  const applyRenderingDefaults = async (
+    sessionId: string,
+    reason: CdpRenderingDefaultsDetails["reason"],
+    defaults: CdpRenderingDefaults,
+  ): Promise<void> => {
     const startedAt = performance.now();
     const results = await Promise.allSettled(
       sendRenderingDefaultCommands(sessionId, defaults),
@@ -867,7 +888,7 @@ export const pipeWebSockets = (
     const message = parseTextCdpMessage(data, isBinary);
     const pageSessionId = clientPageSessionId(message);
     if (pageSessionId) {
-      await applyRenderingDefaults(pageSessionId, "client-command");
+      await applyRenderingDefaultsOnce(pageSessionId, "client-command");
     }
 
     if (
@@ -930,13 +951,13 @@ export const pipeWebSockets = (
       const targetInfo = targetInfoFromParams(params);
       if (typeof params.sessionId === "string" && targetInfo?.type === "page") {
         pageSessionIds.add(params.sessionId);
-        await applyRenderingDefaults(params.sessionId, "page-attached");
       }
     } else if (message?.method === "Target.detachedFromTarget") {
       const params = cdpParams(message);
       if (typeof params.sessionId === "string") {
         pageSessionIds.delete(params.sessionId);
         defaultedPageSessionIds.delete(params.sessionId);
+        defaultingPageSessionIds.delete(params.sessionId);
       }
     }
 

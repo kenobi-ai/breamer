@@ -126,10 +126,9 @@ test("CDP proxy still forwards binary frames as binary", async () => {
   expect(upstream.sent[0]?.isBinary).toBe(true);
 });
 
-test("CDP proxy applies rendering defaults before exposing page sessions", async () => {
+test("CDP proxy exposes page session attachment before rendering defaults", async () => {
   const client = new MockSocket();
   const upstream = new MockSocket();
-  const defaultEvents: string[] = [];
   const attachedEvent = {
     method: "Target.attachedToTarget",
     params: {
@@ -144,13 +143,51 @@ test("CDP proxy applies rendering defaults before exposing page sessions", async
   pipeWebSockets(asWebSocket(client), asWebSocket(upstream), {
     renderingDefaults,
     renderingDefaultsTimeoutMs: 25,
-    onRenderingDefaults: (details) => defaultEvents.push(details.status),
   });
 
   upstream.emit("message", Buffer.from(JSON.stringify(attachedEvent)), false);
   await flushProxyQueue();
 
-  expect(client.sent).toHaveLength(0);
+  expect(client.sent).toHaveLength(1);
+  expect(JSON.parse(client.sent[0]?.data.toString() ?? "{}")).toEqual(
+    attachedEvent,
+  );
+  expect(upstream.sent).toHaveLength(0);
+});
+
+test("CDP proxy applies rendering defaults before first page command", async () => {
+  const client = new MockSocket();
+  const upstream = new MockSocket();
+  const defaultEvents: string[] = [];
+  const attachedEvent = {
+    method: "Target.attachedToTarget",
+    params: {
+      sessionId: "page-session",
+      targetInfo: {
+        targetId: "target-id",
+        type: "page",
+      },
+    },
+  };
+  const clientCommand = {
+    id: 20,
+    sessionId: "page-session",
+    method: "Page.enable",
+  };
+
+  pipeWebSockets(asWebSocket(client), asWebSocket(upstream), {
+    renderingDefaults,
+    renderingDefaultsTimeoutMs: 25,
+    onRenderingDefaults: (details) => defaultEvents.push(details.status),
+  });
+
+  upstream.emit("message", Buffer.from(JSON.stringify(attachedEvent)), false);
+  await flushProxyQueue();
+  expect(client.sent).toHaveLength(1);
+  expect(upstream.sent).toHaveLength(0);
+
+  client.emit("message", Buffer.from(JSON.stringify(clientCommand)), false);
+  await flushProxyQueue();
   expect(upstream.sent).toHaveLength(9);
 
   const commands = upstream.sent.map((frame) =>
@@ -184,9 +221,9 @@ test("CDP proxy applies rendering defaults before exposing page sessions", async
   await flushProxyQueue();
 
   expect(defaultEvents).toEqual(["completed"]);
-  expect(client.sent).toHaveLength(1);
-  expect(JSON.parse(client.sent[0]?.data.toString() ?? "{}")).toEqual(
-    attachedEvent,
+  expect(upstream.sent).toHaveLength(10);
+  expect(JSON.parse(upstream.sent[9]?.data.toString() ?? "{}")).toEqual(
+    clientCommand,
   );
 });
 

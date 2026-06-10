@@ -91,6 +91,12 @@ Options:
   --block-images                           Abort image requests to reduce memory
 `;
 
+const isUsageError = (message: string): boolean =>
+  message.startsWith("Missing ") ||
+  message.startsWith("Unknown option:") ||
+  message.startsWith("Use either ") ||
+  /^--[\w-]+ /.test(message);
+
 const takeValue = (
   args: string[],
   index: number,
@@ -770,8 +776,14 @@ const captureMhtml = async (options: CliOptions): Promise<void> => {
 try {
   await captureMhtml(parseArgs(process.argv.slice(2)));
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  console.error("");
-  console.error(usage);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(message);
+  if (process.env.BREAMER_CAPTURE_DEBUG === "1" && error instanceof Error) {
+    console.error(error.stack);
+  }
+  if (isUsageError(message)) {
+    console.error("");
+    console.error(usage);
+  }
   process.exit(1);
 }
