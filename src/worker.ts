@@ -209,7 +209,7 @@ export class BreamerBrowserContainer extends Container<BreamerEnv> {
       ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE:
         env.BREAMER_ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE ?? "true",
       ARCHIVE_SETTLE_TIMEOUT_MS:
-        env.BREAMER_ARCHIVE_SETTLE_TIMEOUT_MS ?? "2500",
+        env.BREAMER_ARCHIVE_SETTLE_TIMEOUT_MS ?? "10000",
       ARCHIVE_RASTERIZE_DYNAMIC_MEDIA:
         env.BREAMER_ARCHIVE_RASTERIZE_DYNAMIC_MEDIA ?? "true",
       CDP_PROXY: "true",
@@ -330,7 +330,7 @@ export default {
           archiveAutoScrollBeforeCapture:
             env.BREAMER_ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE ?? "true",
           archiveSettleTimeoutMs:
-            env.BREAMER_ARCHIVE_SETTLE_TIMEOUT_MS ?? "2500",
+            env.BREAMER_ARCHIVE_SETTLE_TIMEOUT_MS ?? "10000",
           archiveRasterizeDynamicMedia:
             env.BREAMER_ARCHIVE_RASTERIZE_DYNAMIC_MEDIA ?? "true",
           sleepAfter: env.BREAMER_SLEEP_AFTER,

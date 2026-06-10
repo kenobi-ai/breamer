@@ -3,6 +3,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer";
+import { buildArchiveSettleExpression } from "../src/cdp-proxy.ts";
 
 type WaitUntil = "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
 
@@ -558,6 +559,16 @@ const settlePage = async (page: Page, timeoutMs: number): Promise<void> => {
   );
 };
 
+const settlePageForArchive = async (
+  page: Page,
+  timeoutMs: number,
+  autoScrollBeforeCapture: boolean,
+): Promise<unknown> => {
+  return await page.evaluate(
+    buildArchiveSettleExpression(timeoutMs, autoScrollBeforeCapture, true),
+  );
+};
+
 const readBrowserFingerprint = async (page: Page): Promise<unknown> => {
   return await page.evaluate(async () => {
     const nav = navigator as Navigator & {
@@ -710,6 +721,12 @@ const captureMhtml = async (options: CliOptions): Promise<void> => {
     }
 
     await settlePage(page, Math.min(options.waitTimeoutMs, 5000));
+    console.log("Settling archive resources");
+    const archiveSettle = await settlePageForArchive(
+      page,
+      Math.min(options.waitTimeoutMs, 10_000),
+      false,
+    );
 
     const fingerprint = await readBrowserFingerprint(page);
     const title = await page.title();
@@ -739,6 +756,7 @@ const captureMhtml = async (options: CliOptions): Promise<void> => {
         {
           archiveSize,
           archiveSizeMb: Number((archiveSize / 1024 / 1024).toFixed(2)),
+          archiveSettle,
           fingerprint,
           finalUrl,
           outputPath,

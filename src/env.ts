@@ -36,7 +36,7 @@ const envSchema = z.object({
   BROWSER_TIMEZONE: z.string().default("Europe/London"),
   ARCHIVE_SETTLE_BEFORE_CAPTURE: booleanString.default(true),
   ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE: booleanString.default(true),
-  ARCHIVE_SETTLE_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
+  ARCHIVE_SETTLE_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   ARCHIVE_RASTERIZE_DYNAMIC_MEDIA: booleanString.default(true),
   CHROME_EXECUTABLE_PATH: z.string().optional(),
   PUPPETEER_EXECUTABLE_PATH: z.string().optional(),

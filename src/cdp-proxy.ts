@@ -131,7 +131,7 @@ const cdpIdKey = (id: unknown): string | undefined => {
   return undefined;
 };
 
-const buildArchiveSettleExpression = (
+export const buildArchiveSettleExpression = (
   timeoutMs: number,
   autoScrollBeforeCapture: boolean,
   rasterizeDynamicMedia: boolean,
@@ -454,6 +454,19 @@ const buildArchiveSettleExpression = (
         const maxTotalBytes = 48 * 1024 * 1024;
         const fontCache = new Map<string, Promise<string | undefined>>();
         const fontFaceBlocks: Array<{ baseUrl: string; cssText: string }> = [];
+        const withRemainingDeadline = async <T>(
+          promise: Promise<T>,
+        ): Promise<T | undefined> => {
+          const timeout = Math.max(1, remainingMs() - 50);
+          if (timeout < 100) {
+            return undefined;
+          }
+
+          return await Promise.race([
+            promise,
+            delay(timeout).then(() => undefined),
+          ]);
+        };
 
         const readStyleSheet = async (styleSheet: CSSStyleSheet) => {
           const baseUrl = styleSheet.href ?? document.baseURI;
@@ -473,18 +486,24 @@ const buildArchiveSettleExpression = (
           }
 
           try {
-            const response = await fetch(styleSheet.href, {
-              cache: "force-cache",
-              credentials: "include",
-            });
-            if (!response.ok) {
+            const response = await withRemainingDeadline(
+              fetch(styleSheet.href, {
+                cache: "force-cache",
+                credentials: "include",
+              }),
+            );
+            if (!response?.ok) {
               result.failed++;
               return;
             }
 
-            fontFaceBlocks.push(
-              ...collectFontFaceBlocks(await response.text(), baseUrl),
-            );
+            const cssText = await withRemainingDeadline(response.text());
+            if (!cssText) {
+              result.failed++;
+              return;
+            }
+
+            fontFaceBlocks.push(...collectFontFaceBlocks(cssText, baseUrl));
           } catch (error) {
             void error;
             result.failed++;
@@ -531,16 +550,23 @@ const buildArchiveSettleExpression = (
             }
 
             try {
-              const response = await fetch(href, {
-                cache: "force-cache",
-                credentials: "include",
-              });
-              if (!response.ok) {
+              const response = await withRemainingDeadline(
+                fetch(href, {
+                  cache: "force-cache",
+                  credentials: "include",
+                }),
+              );
+              if (!response?.ok) {
                 result.failed++;
                 return undefined;
               }
 
-              const blob = await response.blob();
+              const blob = await withRemainingDeadline(response.blob());
+              if (!blob) {
+                result.failed++;
+                return undefined;
+              }
+
               if (
                 blob.size <= 0 ||
                 blob.size > maxFontBytes ||
@@ -551,7 +577,13 @@ const buildArchiveSettleExpression = (
               }
 
               result.bytes += blob.size;
-              return await readBlobAsDataUrl(blob);
+              const dataUrl = await withRemainingDeadline(
+                readBlobAsDataUrl(blob),
+              );
+              if (!dataUrl) {
+                result.failed++;
+              }
+              return dataUrl;
             } catch (error) {
               void error;
               result.failed++;
@@ -598,17 +630,15 @@ const buildArchiveSettleExpression = (
           return pieces.join("");
         };
 
-        const inlinedRules: string[] = [];
-        for (const block of fontFaceBlocks) {
-          if (remainingMs() < 150) {
-            break;
-          }
-
-          const inlined = await inlineUrlsInCss(block.cssText, block.baseUrl);
-          if (inlined) {
-            inlinedRules.push(inlined);
-          }
-        }
+        const inlinedRules = (
+          await Promise.all(
+            fontFaceBlocks.map((block) =>
+              remainingMs() < 150
+                ? Promise.resolve(undefined)
+                : inlineUrlsInCss(block.cssText, block.baseUrl),
+            ),
+          )
+        ).filter((rule): rule is string => typeof rule === "string");
 
         if (inlinedRules.length > 0) {
           const style = document.createElement("style");
@@ -799,7 +829,7 @@ export const pipeWebSockets = (
     options.rasterizeDynamicMediaBeforeCapture ?? true;
   const archiveSettleTimeoutMs = Math.max(
     1,
-    options.archiveSettleTimeoutMs ?? 2500,
+    options.archiveSettleTimeoutMs ?? 10000,
   );
   const renderingDefaultsTimeoutMs = Math.max(
     1,
