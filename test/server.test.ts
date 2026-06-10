@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createApp, parseEnv } from "../src/server.ts";
+import { buildChromeLaunchArgs, createApp, parseEnv } from "../src/server.ts";
 
 const fakeBrowserEndpoint =
   "ws://127.0.0.1:9222/devtools/browser/96a96c29-36ad-47da-be46-35249f44dc66";
@@ -44,6 +44,30 @@ test("health endpoint accepts bearer token", async () => {
   expect(response.status).toBe(200);
   expect(body.status).toBe("starting");
   expect(body.network.accessEnabled).toBe(true);
+});
+
+test("Chrome launch args pin high-fidelity rendering defaults", () => {
+  const args = buildChromeLaunchArgs(
+    testEnv({
+      BROWSER_COLOR_GAMUT: "p3",
+      BROWSER_DEVICE_SCALE_FACTOR: 2,
+      BROWSER_WIDTH: 1470,
+      BROWSER_HEIGHT: 956,
+      CHROME_HEAP_SIZE_MB: 4096,
+    }),
+  );
+
+  expect(args).toContain("--force-color-profile=display-p3-d65");
+  expect(args).toContain("--force-device-scale-factor=2");
+  expect(args).toContain("--window-size=1470,956");
+  expect(args).toContain("--enable-accelerated-2d-canvas");
+  expect(args).toContain("--enable-webgl");
+  expect(args).toContain("--enable-webgl2");
+  expect(args).toContain("--ignore-gpu-blocklist");
+  expect(args).toContain("--use-gl=angle");
+  expect(args).toContain("--use-angle=swiftshader");
+  expect(args).toContain("--enable-unsafe-swiftshader");
+  expect(args).toContain("--font-render-hinting=none");
 });
 
 test("/cdp requires the configured access token", async () => {

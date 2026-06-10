@@ -1,9 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
+    "scripts/**/*.ts",
     "test/**/*.test.ts",
     ".pokayoke/rules/**/*.rule.ts",
     ".pokayoke/rules/**/*.rule.test.ts"
   ],
-  "project": ["src/**/*.ts", "test/**/*.ts", ".pokayoke/rules/**/*.ts"]
+  "project": [
+    "scripts/**/*.ts",
+    "src/**/*.ts",
+    "test/**/*.ts",
+    ".pokayoke/rules/**/*.ts"
+  ]
 }

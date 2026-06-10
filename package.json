@@ -26,6 +26,8 @@
   "scripts": {
     "biome": "biome check .",
     "biome:fix": "biome check --write .",
+    "capture:mhtml": "bun scripts/capture-mhtml.ts",
+    "compare:rendering": "bun scripts/compare-rendering.ts",
     "dev": "wrangler dev",
     "deploy": "bun run check && wrangler deploy",
     "dry-run": "wrangler deploy --dry-run",

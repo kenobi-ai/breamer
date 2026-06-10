@@ -27,37 +27,50 @@ ENV NODE_ENV=production \
     CDP_PROXY_PATH=/cdp \
     SHUTDOWN_PATH=/shutdown \
     PUPPETEER_SKIP_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
-    chromium \
+    curl \
     fontconfig \
-    fonts-dejavu-core \
-    fonts-dejavu-extra \
-    fonts-freefont-ttf \
-    fonts-liberation \
-    fonts-noto \
-    fonts-noto-cjk \
-    fonts-noto-color-emoji \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libcups2 \
     libdrm2 \
+    libegl1 \
     libgbm1 \
+    libgl1 \
+    libgles2 \
     libgtk-3-0 \
     libnspr4 \
     libnss3 \
+    libvulkan1 \
     libx11-xcb1 \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
     libxss1 \
+    mesa-vulkan-drivers \
     xdg-utils \
-  && fc-cache -f \
+  && curl -fsSL -o /tmp/google-chrome-stable.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+  && apt-get install -y --no-install-recommends /tmp/google-chrome-stable.deb \
+  && rm -f /tmp/google-chrome-stable.deb \
+  && font_packages="$(apt-cache pkgnames fonts- | sort -u)" \
+  && if [ -n "$font_packages" ]; then \
+    apt-get install -y --no-install-recommends $font_packages; \
+  fi \
   && rm -rf /var/lib/apt/lists/*
+
+COPY docker/fontconfig/breamer.conf /etc/fonts/conf.d/50-breamer-browser-fonts.conf
+RUN mkdir -p /usr/local/share/fonts/google-fonts \
+  && curl -fsSL https://github.com/google/fonts/archive/refs/heads/main.tar.gz \
+    | tar -xz -C /usr/local/share/fonts/google-fonts --strip-components=1 \
+  && find /usr/local/share/fonts/google-fonts -type f \
+    \( -iname "*.otf" -o -iname "*.otc" -o -iname "*.ttc" -o -iname "*.ttf" \) \
+    -exec chmod 0644 "{}" \; \
+  && fc-cache -f
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production --omit optional --ignore-scripts \

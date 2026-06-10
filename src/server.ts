@@ -7,7 +7,7 @@ import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import puppeteer, { type Browser, type Page } from "puppeteer";
 import { WebSocket, WebSocketServer } from "ws";
-import { pipeWebSockets } from "./cdp-proxy.js";
+import { type CdpRenderingDefaults, pipeWebSockets } from "./cdp-proxy.js";
 import { type Env, parseEnv } from "./env.js";
 import { logger } from "./logger.js";
 import {
@@ -21,8 +21,30 @@ type AppVariables = {
   sessionId?: string;
 };
 
+interface BrowserPersona {
+  acceptLanguage: string;
+  browserVersion: string;
+  colorProfile: string;
+  deviceMemoryGb: number;
+  hardwareConcurrency: number;
+  languages: string[];
+  userAgent: string;
+  userAgentMetadata: {
+    architecture: string;
+    bitness: string;
+    brands: Array<{ brand: string; version: string }>;
+    fullVersionList: Array<{ brand: string; version: string }>;
+    mobile: boolean;
+    model: string;
+    platform: string;
+    platformVersion: string;
+    wow64: boolean;
+  };
+}
+
 let browser: Browser | null = null;
 let browserLaunchPromise: Promise<Browser> | null = null;
+let activeBrowserPersona: BrowserPersona | null = null;
 
 const pageCleanupTimers = new WeakMap<Page, NodeJS.Timeout>();
 
@@ -36,6 +58,14 @@ const metrics = {
   pageErrors: 0,
   cdpProxyConnections: 0,
   cdpProxyErrors: 0,
+  pageDefaultsApplied: 0,
+  pageDefaultsFailed: 0,
+  cdpRenderingDefaultsCompleted: 0,
+  cdpRenderingDefaultsFailed: 0,
+  cdpRenderingDefaultsTimedOut: 0,
+  archiveSettleCompleted: 0,
+  archiveSettleFailed: 0,
+  archiveSettleTimedOut: 0,
 };
 
 const formatUptime = (ms: number): string => {
@@ -86,6 +116,228 @@ const resolveExecutablePath = (env: Env): string | undefined => {
   return env.CHROME_EXECUTABLE_PATH ?? env.PUPPETEER_EXECUTABLE_PATH;
 };
 
+const chromeVersionFrom = (value: string): string | undefined => {
+  return /(?:Chrome|Chromium)\/([0-9.]+)/.exec(value)?.[1];
+};
+
+const buildMacChromeUserAgent = (env: Env, browserVersion: string): string => {
+  if (env.BROWSER_USER_AGENT) {
+    return env.BROWSER_USER_AGENT;
+  }
+
+  const chromeVersion = chromeVersionFrom(browserVersion) ?? "131.0.0.0";
+  return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+};
+
+const normalizeLanguages = (locale: string): string[] => {
+  const languages = locale
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return languages.length > 0 ? languages : ["en-US", "en"];
+};
+
+const buildAcceptLanguageHeader = (languages: string[]): string => {
+  return languages
+    .map((language, index) => {
+      if (index === 0) {
+        return language;
+      }
+
+      const quality = Math.max(0.1, 1 - index * 0.1).toFixed(1);
+      return `${language};q=${quality}`;
+    })
+    .join(",");
+};
+
+const buildBrowserPersona = (
+  env: Env,
+  browserVersion: string,
+): BrowserPersona => {
+  const userAgent = buildMacChromeUserAgent(env, browserVersion);
+  const chromeVersion =
+    chromeVersionFrom(userAgent) ?? chromeVersionFrom(browserVersion) ?? "131";
+  const chromeMajor = chromeVersion.split(".")[0] ?? "131";
+  const fullChromeVersion = chromeVersion.includes(".")
+    ? chromeVersion
+    : `${chromeMajor}.0.0.0`;
+  const languages = normalizeLanguages(env.BROWSER_LOCALE);
+
+  return {
+    acceptLanguage: buildAcceptLanguageHeader(languages),
+    browserVersion,
+    colorProfile: env.BROWSER_COLOR_GAMUT === "p3" ? "display-p3-d65" : "srgb",
+    deviceMemoryGb: env.BROWSER_DEVICE_MEMORY_GB,
+    hardwareConcurrency: env.BROWSER_HARDWARE_CONCURRENCY,
+    languages,
+    userAgent,
+    userAgentMetadata: {
+      architecture: env.BROWSER_CLIENT_HINT_ARCHITECTURE,
+      bitness: "64",
+      brands: [
+        { brand: "Chromium", version: chromeMajor },
+        { brand: "Google Chrome", version: chromeMajor },
+        { brand: "Not.A/Brand", version: "99" },
+      ],
+      fullVersionList: [
+        { brand: "Chromium", version: fullChromeVersion },
+        { brand: "Google Chrome", version: fullChromeVersion },
+        { brand: "Not.A/Brand", version: "99.0.0.0" },
+      ],
+      mobile: false,
+      model: "",
+      platform: env.BROWSER_CLIENT_HINT_PLATFORM,
+      platformVersion: env.BROWSER_CLIENT_HINT_PLATFORM_VERSION,
+      wow64: false,
+    },
+  };
+};
+
+const buildCdpRenderingDefaults = (
+  env: Env,
+  persona: BrowserPersona,
+): CdpRenderingDefaults => ({
+  acceptLanguage: persona.acceptLanguage,
+  colorGamut: env.BROWSER_COLOR_GAMUT,
+  deviceMemoryGb: persona.deviceMemoryGb,
+  deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
+  hardwareConcurrency: persona.hardwareConcurrency,
+  height: env.BROWSER_HEIGHT,
+  languages: persona.languages,
+  platform: env.BROWSER_PLATFORM,
+  prefersColorScheme: env.BROWSER_PREFERS_COLOR_SCHEME,
+  prefersReducedMotion: env.BROWSER_PREFERS_REDUCED_MOTION,
+  ...(env.BROWSER_TIMEZONE ? { timezone: env.BROWSER_TIMEZONE } : {}),
+  userAgent: persona.userAgent,
+  userAgentMetadata: persona.userAgentMetadata,
+  width: env.BROWSER_WIDTH,
+});
+
+const applyPageRenderingDefaults = async (
+  page: Page,
+  env: Env,
+  persona: BrowserPersona,
+): Promise<void> => {
+  await page.setViewport({
+    width: env.BROWSER_WIDTH,
+    height: env.BROWSER_HEIGHT,
+    deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
+    isMobile: false,
+    hasTouch: false,
+  });
+
+  await page.setUserAgent({
+    userAgent: persona.userAgent,
+    userAgentMetadata: persona.userAgentMetadata,
+    platform: env.BROWSER_PLATFORM,
+  });
+
+  await page.setExtraHTTPHeaders({
+    "Accept-Language": persona.acceptLanguage,
+  });
+
+  await page.emulateMediaType("screen");
+  await page.emulateMediaFeatures([
+    { name: "color-gamut", value: env.BROWSER_COLOR_GAMUT },
+    { name: "prefers-color-scheme", value: env.BROWSER_PREFERS_COLOR_SCHEME },
+    {
+      name: "prefers-reduced-motion",
+      value: env.BROWSER_PREFERS_REDUCED_MOTION,
+    },
+  ]);
+
+  if (env.BROWSER_TIMEZONE) {
+    await page.emulateTimezone(env.BROWSER_TIMEZONE);
+  }
+
+  await page.evaluateOnNewDocument(
+    (
+      deviceMemoryGb: number,
+      hardwareConcurrency: number,
+      height: number,
+      platform: string,
+      languages: string[],
+      width: number,
+    ) => {
+      Object.defineProperty(navigator, "language", {
+        configurable: true,
+        get: () => languages[0],
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        get: () => platform,
+      });
+      Object.defineProperty(navigator, "languages", {
+        configurable: true,
+        get: () => languages,
+      });
+      Object.defineProperty(navigator, "webdriver", {
+        configurable: true,
+        get: () => undefined,
+      });
+      Object.defineProperty(navigator, "hardwareConcurrency", {
+        configurable: true,
+        get: () => hardwareConcurrency,
+      });
+      Object.defineProperty(navigator, "deviceMemory", {
+        configurable: true,
+        get: () => deviceMemoryGb,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        get: () => 0,
+      });
+      Object.defineProperty(navigator, "pdfViewerEnabled", {
+        configurable: true,
+        get: () => true,
+      });
+      Object.defineProperty(navigator, "vendor", {
+        configurable: true,
+        get: () => "Google Inc.",
+      });
+      Object.defineProperty(screen, "width", {
+        configurable: true,
+        get: () => width,
+      });
+      Object.defineProperty(screen, "height", {
+        configurable: true,
+        get: () => height,
+      });
+      Object.defineProperty(screen, "availWidth", {
+        configurable: true,
+        get: () => width,
+      });
+      Object.defineProperty(screen, "availHeight", {
+        configurable: true,
+        get: () => height,
+      });
+    },
+    persona.deviceMemoryGb,
+    persona.hardwareConcurrency,
+    env.BROWSER_HEIGHT,
+    env.BROWSER_PLATFORM,
+    persona.languages,
+    env.BROWSER_WIDTH,
+  );
+
+  const client = await page.createCDPSession();
+  await Promise.allSettled([
+    client.send("Emulation.setLocaleOverride", {
+      locale: persona.languages[0],
+    }),
+    client.send("Emulation.setNavigatorOverrides", {
+      platform: env.BROWSER_PLATFORM,
+    }),
+    client.send("Emulation.setFocusEmulationEnabled", { enabled: true }),
+    client.send("Emulation.setIdleOverride", {
+      isUserActive: true,
+      isScreenUnlocked: true,
+    }),
+  ]);
+  await client.detach().catch(() => undefined);
+};
+
 const describeError = (err: unknown): string => {
   if (err instanceof Error) {
     return err.message;
@@ -108,6 +360,44 @@ const headerValue = (
   value: string | string[] | undefined,
 ): string | undefined => (Array.isArray(value) ? value[0] : value);
 
+export const buildChromeLaunchArgs = (env: Env): string[] => [
+  `--remote-debugging-port=${env.CHROME_DEBUG_PORT}`,
+  "--remote-debugging-address=0.0.0.0",
+  `--window-size=${env.BROWSER_WIDTH},${env.BROWSER_HEIGHT}`,
+  `--force-device-scale-factor=${env.BROWSER_DEVICE_SCALE_FACTOR}`,
+  `--lang=${normalizeLanguages(env.BROWSER_LOCALE)[0] ?? "en-US"}`,
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--disable-default-apps",
+  "--disable-popup-blocking",
+  "--disable-extensions",
+  "--disable-sync",
+  "--disable-background-networking",
+  "--disable-dev-shm-usage",
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  `--js-flags=--max-old-space-size=${env.CHROME_HEAP_SIZE_MB}`,
+  "--disable-features=TranslateUI",
+  "--disable-blink-features=AutomationControlled",
+  "--disable-breakpad",
+  "--disable-component-update",
+  "--enable-font-antialiasing",
+  "--font-render-hinting=none",
+  "--enable-accelerated-2d-canvas",
+  "--enable-webgl",
+  "--enable-webgl2",
+  "--ignore-gpu-blocklist",
+  "--use-gl=angle",
+  "--use-angle=swiftshader",
+  "--enable-unsafe-swiftshader",
+  `--force-color-profile=${
+    env.BROWSER_COLOR_GAMUT === "p3" ? "display-p3-d65" : "srgb"
+  }`,
+  "--high-dpi-support=1",
+  "--run-all-compositor-stages-before-draw",
+  `--user-agent=${buildMacChromeUserAgent(env, "Chrome/131.0.0.0")}`,
+];
+
 const launchBrowser = async (env: Env): Promise<Browser> => {
   const executablePath = resolveExecutablePath(env);
   logger.browser("launching", {
@@ -124,33 +414,33 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
   const launchedBrowser = await puppeteer.launch({
     executablePath,
     headless: env.HEADLESS,
-    args: [
-      `--remote-debugging-port=${env.CHROME_DEBUG_PORT}`,
-      "--remote-debugging-address=0.0.0.0",
-      `--window-size=${env.BROWSER_WIDTH},${env.BROWSER_HEIGHT}`,
-      `--force-device-scale-factor=${env.BROWSER_DEVICE_SCALE_FACTOR}`,
-      `--lang=${env.BROWSER_LOCALE}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-default-apps",
-      "--disable-popup-blocking",
-      "--disable-extensions",
-      "--disable-sync",
-      "--disable-background-networking",
-      "--disable-dev-shm-usage",
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      `--js-flags=--max-old-space-size=${env.CHROME_HEAP_SIZE_MB}`,
-      "--disable-features=TranslateUI",
-      "--disable-breakpad",
-      "--disable-component-update",
-      ...(env.BROWSER_USER_AGENT
-        ? [`--user-agent=${env.BROWSER_USER_AGENT}`]
-        : []),
-    ],
+    defaultViewport: {
+      width: env.BROWSER_WIDTH,
+      height: env.BROWSER_HEIGHT,
+      deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
+    },
+    args: buildChromeLaunchArgs(env),
   });
 
   browser = launchedBrowser;
+  const browserVersion = await launchedBrowser
+    .version()
+    .catch(() => "Chrome/131.0.0.0");
+  const browserPersona = buildBrowserPersona(env, browserVersion);
+  activeBrowserPersona = browserPersona;
+
+  logger.browser("persona", {
+    browserVersion,
+    userAgent: browserPersona.userAgent,
+    platform: env.BROWSER_PLATFORM,
+    clientHintPlatform: env.BROWSER_CLIENT_HINT_PLATFORM,
+    clientHintArchitecture: env.BROWSER_CLIENT_HINT_ARCHITECTURE,
+    colorGamut: env.BROWSER_COLOR_GAMUT,
+    colorProfile: browserPersona.colorProfile,
+    hardwareConcurrency: browserPersona.hardwareConcurrency,
+    deviceMemoryGb: browserPersona.deviceMemoryGb,
+    deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
+  });
 
   launchedBrowser.on("disconnected", () => {
     logger.browser("disconnected", {
@@ -160,6 +450,7 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
     });
     if (browser === launchedBrowser) {
       browser = null;
+      activeBrowserPersona = null;
     }
   });
 
@@ -179,6 +470,17 @@ const launchBrowser = async (env: Env): Promise<Browser> => {
       if (!page) {
         logger.target("page unavailable", type, url || "(blank)");
         return;
+      }
+
+      page.setDefaultTimeout(env.PAGE_TIMEOUT_MS);
+      page.setDefaultNavigationTimeout(env.PAGE_TIMEOUT_MS);
+
+      try {
+        await applyPageRenderingDefaults(page, env, browserPersona);
+        metrics.pageDefaultsApplied++;
+      } catch (error) {
+        metrics.pageDefaultsFailed++;
+        logger.target("render defaults failed", type, describeError(error));
       }
 
       page.on("framenavigated", (frame) => {
@@ -274,6 +576,10 @@ const installCdpProxy = (server: Server, env: Env): void => {
       const targetUrl = `${browserEndpoint.protocol}//${browserEndpoint.host}${targetPath}`;
 
       wss.handleUpgrade(request, socket, head, (client) => {
+        const renderingDefaults = activeBrowserPersona
+          ? buildCdpRenderingDefaults(env, activeBrowserPersona)
+          : undefined;
+
         metrics.cdpProxyConnections++;
         logger.cdp("proxy connect", {
           requestId,
@@ -302,6 +608,44 @@ const installCdpProxy = (server: Server, env: Env): void => {
           });
         });
         pipeWebSockets(client, upstream, {
+          archiveSettleTimeoutMs: env.ARCHIVE_SETTLE_TIMEOUT_MS,
+          autoScrollBeforeCaptureSnapshot:
+            env.ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE,
+          rasterizeDynamicMediaBeforeCapture:
+            env.ARCHIVE_RASTERIZE_DYNAMIC_MEDIA,
+          ...(renderingDefaults ? { renderingDefaults } : {}),
+          renderingDefaultsTimeoutMs: 1500,
+          settleBeforeCaptureSnapshot: env.ARCHIVE_SETTLE_BEFORE_CAPTURE,
+          onRenderingDefaults: (details) => {
+            if (details.status === "completed") {
+              metrics.cdpRenderingDefaultsCompleted++;
+            } else if (details.status === "timeout") {
+              metrics.cdpRenderingDefaultsTimedOut++;
+            } else {
+              metrics.cdpRenderingDefaultsFailed++;
+            }
+
+            logger.cdp("rendering defaults", {
+              requestId,
+              connectionSessionId: sessionId,
+              ...details,
+            });
+          },
+          onArchiveSettle: (details) => {
+            if (details.status === "completed") {
+              metrics.archiveSettleCompleted++;
+            } else if (details.status === "timeout") {
+              metrics.archiveSettleTimedOut++;
+            } else {
+              metrics.archiveSettleFailed++;
+            }
+
+            logger.cdp("archive settle", {
+              requestId,
+              sessionId,
+              ...details,
+            });
+          },
           onUpstreamError: (err) => {
             metrics.cdpProxyErrors++;
             logger.error(
@@ -438,6 +782,22 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         debugPort: env.CHROME_DEBUG_PORT,
         openPages: pages.length,
         pageTimeoutMs: env.PAGE_TIMEOUT_MS,
+        archiveSettleBeforeCapture: env.ARCHIVE_SETTLE_BEFORE_CAPTURE,
+        archiveAutoScrollBeforeCapture: env.ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE,
+        archiveSettleTimeoutMs: env.ARCHIVE_SETTLE_TIMEOUT_MS,
+        archiveRasterizeDynamicMedia: env.ARCHIVE_RASTERIZE_DYNAMIC_MEDIA,
+        renderingDefaults: {
+          userAgent: activeBrowserPersona?.userAgent ?? null,
+          platform: env.BROWSER_PLATFORM,
+          clientHintPlatform: env.BROWSER_CLIENT_HINT_PLATFORM,
+          clientHintArchitecture: env.BROWSER_CLIENT_HINT_ARCHITECTURE,
+          colorGamut: env.BROWSER_COLOR_GAMUT,
+          hardwareConcurrency: env.BROWSER_HARDWARE_CONCURRENCY,
+          deviceMemoryGb: env.BROWSER_DEVICE_MEMORY_GB,
+          prefersColorScheme: env.BROWSER_PREFERS_COLOR_SCHEME,
+          prefersReducedMotion: env.BROWSER_PREFERS_REDUCED_MOTION,
+          timezone: env.BROWSER_TIMEZONE ?? null,
+        },
       },
       metrics: {
         uptimeMs,
@@ -450,6 +810,14 @@ export const createApp = (env: Env, options: CreateAppOptions = {}) => {
         pageErrors: metrics.pageErrors,
         cdpProxyConnections: metrics.cdpProxyConnections,
         cdpProxyErrors: metrics.cdpProxyErrors,
+        pageDefaultsApplied: metrics.pageDefaultsApplied,
+        pageDefaultsFailed: metrics.pageDefaultsFailed,
+        cdpRenderingDefaultsCompleted: metrics.cdpRenderingDefaultsCompleted,
+        cdpRenderingDefaultsFailed: metrics.cdpRenderingDefaultsFailed,
+        cdpRenderingDefaultsTimedOut: metrics.cdpRenderingDefaultsTimedOut,
+        archiveSettleCompleted: metrics.archiveSettleCompleted,
+        archiveSettleFailed: metrics.archiveSettleFailed,
+        archiveSettleTimedOut: metrics.archiveSettleTimedOut,
       },
       network: {
         host: env.HOST,
@@ -583,6 +951,20 @@ interface StartServerOptions {
   browserDeviceScaleFactor?: number;
   browserLocale?: string;
   browserUserAgent?: string;
+  browserPlatform?: string;
+  browserClientHintPlatform?: string;
+  browserClientHintArchitecture?: string;
+  browserClientHintPlatformVersion?: string;
+  browserColorGamut?: Env["BROWSER_COLOR_GAMUT"];
+  browserHardwareConcurrency?: number;
+  browserDeviceMemoryGb?: number;
+  browserPrefersColorScheme?: Env["BROWSER_PREFERS_COLOR_SCHEME"];
+  browserPrefersReducedMotion?: Env["BROWSER_PREFERS_REDUCED_MOTION"];
+  browserTimezone?: string;
+  archiveSettleBeforeCapture?: boolean;
+  archiveAutoScrollBeforeCapture?: boolean;
+  archiveSettleTimeoutMs?: number;
+  archiveRasterizeDynamicMedia?: boolean;
   chromeExecutablePath?: string;
   publicOrigin?: string;
   cdpProxy?: boolean;
@@ -606,6 +988,21 @@ const startServer = async (options: StartServerOptions = {}) => {
     BROWSER_DEVICE_SCALE_FACTOR: options.browserDeviceScaleFactor,
     BROWSER_LOCALE: options.browserLocale,
     BROWSER_USER_AGENT: options.browserUserAgent,
+    BROWSER_PLATFORM: options.browserPlatform,
+    BROWSER_CLIENT_HINT_PLATFORM: options.browserClientHintPlatform,
+    BROWSER_CLIENT_HINT_ARCHITECTURE: options.browserClientHintArchitecture,
+    BROWSER_CLIENT_HINT_PLATFORM_VERSION:
+      options.browserClientHintPlatformVersion,
+    BROWSER_COLOR_GAMUT: options.browserColorGamut,
+    BROWSER_HARDWARE_CONCURRENCY: options.browserHardwareConcurrency,
+    BROWSER_DEVICE_MEMORY_GB: options.browserDeviceMemoryGb,
+    BROWSER_PREFERS_COLOR_SCHEME: options.browserPrefersColorScheme,
+    BROWSER_PREFERS_REDUCED_MOTION: options.browserPrefersReducedMotion,
+    BROWSER_TIMEZONE: options.browserTimezone,
+    ARCHIVE_SETTLE_BEFORE_CAPTURE: options.archiveSettleBeforeCapture,
+    ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE: options.archiveAutoScrollBeforeCapture,
+    ARCHIVE_SETTLE_TIMEOUT_MS: options.archiveSettleTimeoutMs,
+    ARCHIVE_RASTERIZE_DYNAMIC_MEDIA: options.archiveRasterizeDynamicMedia,
     CHROME_EXECUTABLE_PATH: options.chromeExecutablePath,
     ACCESS_TOKEN: options.accessToken,
     PUBLIC_ORIGIN: options.publicOrigin,
@@ -626,6 +1023,16 @@ const startServer = async (options: StartServerOptions = {}) => {
     viewport: `${env.BROWSER_WIDTH}x${env.BROWSER_HEIGHT}`,
     deviceScaleFactor: env.BROWSER_DEVICE_SCALE_FACTOR,
     locale: env.BROWSER_LOCALE,
+    platform: env.BROWSER_PLATFORM,
+    clientHintPlatform: env.BROWSER_CLIENT_HINT_PLATFORM,
+    colorGamut: env.BROWSER_COLOR_GAMUT,
+    hardwareConcurrency: env.BROWSER_HARDWARE_CONCURRENCY,
+    deviceMemoryGb: env.BROWSER_DEVICE_MEMORY_GB,
+    prefersColorScheme: env.BROWSER_PREFERS_COLOR_SCHEME,
+    archiveSettleBeforeCapture: env.ARCHIVE_SETTLE_BEFORE_CAPTURE,
+    archiveAutoScrollBeforeCapture: env.ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE,
+    archiveSettleTimeoutMs: env.ARCHIVE_SETTLE_TIMEOUT_MS,
+    archiveRasterizeDynamicMedia: env.ARCHIVE_RASTERIZE_DYNAMIC_MEDIA,
     accessEnabled: Boolean(env.ACCESS_TOKEN),
   });
 

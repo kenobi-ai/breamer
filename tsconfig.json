@@ -15,6 +15,7 @@
     "noEmit": true
   },
   "include": [
+    "scripts/**/*.ts",
     "src/cdp-proxy.ts",
     "src/env.ts",
     "src/logger.ts",

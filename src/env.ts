@@ -8,6 +8,10 @@ const booleanString = z
     typeof value === "boolean" ? value : value === "true",
   );
 
+const colorGamut = z.enum(["srgb", "p3", "rec2020"]);
+const colorScheme = z.enum(["light", "dark"]);
+const reducedMotion = z.enum(["no-preference", "reduce"]);
+
 const envSchema = z.object({
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -20,6 +24,20 @@ const envSchema = z.object({
   BROWSER_DEVICE_SCALE_FACTOR: z.coerce.number().positive(),
   BROWSER_LOCALE: z.string().min(1),
   BROWSER_USER_AGENT: z.string().optional(),
+  BROWSER_PLATFORM: z.string().default("MacIntel"),
+  BROWSER_CLIENT_HINT_PLATFORM: z.string().default("macOS"),
+  BROWSER_CLIENT_HINT_ARCHITECTURE: z.string().default("arm"),
+  BROWSER_CLIENT_HINT_PLATFORM_VERSION: z.string().default("15.0.0"),
+  BROWSER_COLOR_GAMUT: colorGamut.default("p3"),
+  BROWSER_HARDWARE_CONCURRENCY: z.coerce.number().int().positive().default(10),
+  BROWSER_DEVICE_MEMORY_GB: z.coerce.number().int().positive().default(8),
+  BROWSER_PREFERS_COLOR_SCHEME: colorScheme.default("light"),
+  BROWSER_PREFERS_REDUCED_MOTION: reducedMotion.default("no-preference"),
+  BROWSER_TIMEZONE: z.string().default("Europe/London"),
+  ARCHIVE_SETTLE_BEFORE_CAPTURE: booleanString.default(true),
+  ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE: booleanString.default(true),
+  ARCHIVE_SETTLE_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
+  ARCHIVE_RASTERIZE_DYNAMIC_MEDIA: booleanString.default(true),
   CHROME_EXECUTABLE_PATH: z.string().optional(),
   PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
   ACCESS_TOKEN: z.string().optional(),
@@ -61,6 +79,45 @@ export const parseEnv = (overrides: Partial<Env> = {}): Env => {
     BROWSER_LOCALE: overrides.BROWSER_LOCALE ?? process.env.BROWSER_LOCALE,
     BROWSER_USER_AGENT:
       overrides.BROWSER_USER_AGENT ?? process.env.BROWSER_USER_AGENT,
+    BROWSER_PLATFORM:
+      overrides.BROWSER_PLATFORM ?? process.env.BROWSER_PLATFORM,
+    BROWSER_CLIENT_HINT_PLATFORM:
+      overrides.BROWSER_CLIENT_HINT_PLATFORM ??
+      process.env.BROWSER_CLIENT_HINT_PLATFORM,
+    BROWSER_CLIENT_HINT_ARCHITECTURE:
+      overrides.BROWSER_CLIENT_HINT_ARCHITECTURE ??
+      process.env.BROWSER_CLIENT_HINT_ARCHITECTURE,
+    BROWSER_CLIENT_HINT_PLATFORM_VERSION:
+      overrides.BROWSER_CLIENT_HINT_PLATFORM_VERSION ??
+      process.env.BROWSER_CLIENT_HINT_PLATFORM_VERSION,
+    BROWSER_COLOR_GAMUT:
+      overrides.BROWSER_COLOR_GAMUT ?? process.env.BROWSER_COLOR_GAMUT,
+    BROWSER_HARDWARE_CONCURRENCY:
+      overrides.BROWSER_HARDWARE_CONCURRENCY ??
+      process.env.BROWSER_HARDWARE_CONCURRENCY,
+    BROWSER_DEVICE_MEMORY_GB:
+      overrides.BROWSER_DEVICE_MEMORY_GB ??
+      process.env.BROWSER_DEVICE_MEMORY_GB,
+    BROWSER_PREFERS_COLOR_SCHEME:
+      overrides.BROWSER_PREFERS_COLOR_SCHEME ??
+      process.env.BROWSER_PREFERS_COLOR_SCHEME,
+    BROWSER_PREFERS_REDUCED_MOTION:
+      overrides.BROWSER_PREFERS_REDUCED_MOTION ??
+      process.env.BROWSER_PREFERS_REDUCED_MOTION,
+    BROWSER_TIMEZONE:
+      overrides.BROWSER_TIMEZONE ?? process.env.BROWSER_TIMEZONE,
+    ARCHIVE_SETTLE_BEFORE_CAPTURE:
+      overrides.ARCHIVE_SETTLE_BEFORE_CAPTURE ??
+      process.env.ARCHIVE_SETTLE_BEFORE_CAPTURE,
+    ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE:
+      overrides.ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE ??
+      process.env.ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE,
+    ARCHIVE_SETTLE_TIMEOUT_MS:
+      overrides.ARCHIVE_SETTLE_TIMEOUT_MS ??
+      process.env.ARCHIVE_SETTLE_TIMEOUT_MS,
+    ARCHIVE_RASTERIZE_DYNAMIC_MEDIA:
+      overrides.ARCHIVE_RASTERIZE_DYNAMIC_MEDIA ??
+      process.env.ARCHIVE_RASTERIZE_DYNAMIC_MEDIA,
     CHROME_EXECUTABLE_PATH:
       overrides.CHROME_EXECUTABLE_PATH ?? process.env.CHROME_EXECUTABLE_PATH,
     PUPPETEER_EXECUTABLE_PATH:

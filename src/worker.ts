@@ -188,10 +188,34 @@ export class BreamerBrowserContainer extends Container<BreamerEnv> {
       BROWSER_HEIGHT: env.BREAMER_BROWSER_HEIGHT,
       BROWSER_DEVICE_SCALE_FACTOR: env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR,
       BROWSER_LOCALE: env.BREAMER_BROWSER_LOCALE,
+      BROWSER_PLATFORM: env.BREAMER_BROWSER_PLATFORM ?? "MacIntel",
+      BROWSER_CLIENT_HINT_PLATFORM:
+        env.BREAMER_BROWSER_CLIENT_HINT_PLATFORM ?? "macOS",
+      BROWSER_CLIENT_HINT_ARCHITECTURE:
+        env.BREAMER_BROWSER_CLIENT_HINT_ARCHITECTURE ?? "arm",
+      BROWSER_CLIENT_HINT_PLATFORM_VERSION:
+        env.BREAMER_BROWSER_CLIENT_HINT_PLATFORM_VERSION ?? "15.0.0",
+      BROWSER_COLOR_GAMUT: env.BREAMER_BROWSER_COLOR_GAMUT ?? "p3",
+      BROWSER_HARDWARE_CONCURRENCY:
+        env.BREAMER_BROWSER_HARDWARE_CONCURRENCY ?? "10",
+      BROWSER_DEVICE_MEMORY_GB: env.BREAMER_BROWSER_DEVICE_MEMORY_GB ?? "8",
+      BROWSER_PREFERS_COLOR_SCHEME:
+        env.BREAMER_BROWSER_PREFERS_COLOR_SCHEME ?? "light",
+      BROWSER_PREFERS_REDUCED_MOTION:
+        env.BREAMER_BROWSER_PREFERS_REDUCED_MOTION ?? "no-preference",
+      BROWSER_TIMEZONE: env.BREAMER_BROWSER_TIMEZONE ?? "Europe/London",
+      ARCHIVE_SETTLE_BEFORE_CAPTURE:
+        env.BREAMER_ARCHIVE_SETTLE_BEFORE_CAPTURE ?? "true",
+      ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE:
+        env.BREAMER_ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE ?? "true",
+      ARCHIVE_SETTLE_TIMEOUT_MS:
+        env.BREAMER_ARCHIVE_SETTLE_TIMEOUT_MS ?? "2500",
+      ARCHIVE_RASTERIZE_DYNAMIC_MEDIA:
+        env.BREAMER_ARCHIVE_RASTERIZE_DYNAMIC_MEDIA ?? "true",
       CDP_PROXY: "true",
       CDP_PROXY_PATH: "/cdp",
       SHUTDOWN_PATH,
-      PUPPETEER_EXECUTABLE_PATH: "/usr/bin/chromium",
+      PUPPETEER_EXECUTABLE_PATH: "/usr/bin/google-chrome-stable",
       ...(env.BREAMER_ACCESS_TOKEN
         ? { ACCESS_TOKEN: env.BREAMER_ACCESS_TOKEN }
         : {}),
@@ -285,6 +309,30 @@ export default {
             deviceScaleFactor: env.BREAMER_BROWSER_DEVICE_SCALE_FACTOR,
           },
           browserLocale: env.BREAMER_BROWSER_LOCALE,
+          browserPlatform: env.BREAMER_BROWSER_PLATFORM ?? "MacIntel",
+          browserClientHintPlatform:
+            env.BREAMER_BROWSER_CLIENT_HINT_PLATFORM ?? "macOS",
+          browserClientHintArchitecture:
+            env.BREAMER_BROWSER_CLIENT_HINT_ARCHITECTURE ?? "arm",
+          browserClientHintPlatformVersion:
+            env.BREAMER_BROWSER_CLIENT_HINT_PLATFORM_VERSION ?? "15.0.0",
+          browserColorGamut: env.BREAMER_BROWSER_COLOR_GAMUT ?? "p3",
+          browserHardwareConcurrency:
+            env.BREAMER_BROWSER_HARDWARE_CONCURRENCY ?? "10",
+          browserDeviceMemoryGb: env.BREAMER_BROWSER_DEVICE_MEMORY_GB ?? "8",
+          browserPrefersColorScheme:
+            env.BREAMER_BROWSER_PREFERS_COLOR_SCHEME ?? "light",
+          browserPrefersReducedMotion:
+            env.BREAMER_BROWSER_PREFERS_REDUCED_MOTION ?? "no-preference",
+          browserTimezone: env.BREAMER_BROWSER_TIMEZONE ?? "Europe/London",
+          archiveSettleBeforeCapture:
+            env.BREAMER_ARCHIVE_SETTLE_BEFORE_CAPTURE ?? "true",
+          archiveAutoScrollBeforeCapture:
+            env.BREAMER_ARCHIVE_AUTO_SCROLL_BEFORE_CAPTURE ?? "true",
+          archiveSettleTimeoutMs:
+            env.BREAMER_ARCHIVE_SETTLE_TIMEOUT_MS ?? "2500",
+          archiveRasterizeDynamicMedia:
+            env.BREAMER_ARCHIVE_RASTERIZE_DYNAMIC_MEDIA ?? "true",
           sleepAfter: env.BREAMER_SLEEP_AFTER,
         }),
         "worker.health",
