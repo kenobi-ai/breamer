@@ -37,15 +37,21 @@ RUN apt-get update \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
+    libcairo2 \
     libcups2 \
     libdrm2 \
     libegl1 \
+    libfontconfig1 \
+    libfreetype6 \
     libgbm1 \
     libgl1 \
     libgles2 \
     libgtk-3-0 \
+    libharfbuzz0b \
     libnspr4 \
     libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
     libvulkan1 \
     libx11-xcb1 \
     libxcomposite1 \
@@ -55,22 +61,35 @@ RUN apt-get update \
     mesa-vulkan-drivers \
     xdg-utils \
   && curl -fsSL -o /tmp/google-chrome-stable.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-  && apt-get install -y --no-install-recommends /tmp/google-chrome-stable.deb \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/google-chrome-stable.deb \
   && rm -f /tmp/google-chrome-stable.deb \
+  && desktop_font_packages=" \
+    fonts-croscore \
+    fonts-dejavu \
+    fonts-font-awesome \
+    fonts-inter \
+    fonts-liberation2 \
+    fonts-material-design-icons-iconfont \
+    fonts-noto \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fonts-noto-core \
+    fonts-noto-extra \
+    fonts-noto-ui-core \
+    fonts-open-sans \
+    fonts-roboto \
+    fonts-symbola \
+    fonts-urw-base35 \
+  " \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $desktop_font_packages \
   && font_packages="$(apt-cache pkgnames fonts- | sort -u)" \
   && if [ -n "$font_packages" ]; then \
-    apt-get install -y --no-install-recommends $font_packages; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $font_packages; \
   fi \
   && rm -rf /var/lib/apt/lists/*
 
 COPY docker/fontconfig/breamer.conf /etc/fonts/conf.d/50-breamer-browser-fonts.conf
-RUN mkdir -p /usr/local/share/fonts/google-fonts \
-  && curl -fsSL https://github.com/google/fonts/archive/refs/heads/main.tar.gz \
-    | tar -xz -C /usr/local/share/fonts/google-fonts --strip-components=1 \
-  && find /usr/local/share/fonts/google-fonts -type f \
-    \( -iname "*.otf" -o -iname "*.otc" -o -iname "*.ttc" -o -iname "*.ttf" \) \
-    -exec chmod 0644 "{}" \; \
-  && fc-cache -f
+RUN fc-cache -f
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production --omit optional --ignore-scripts \
