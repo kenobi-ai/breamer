@@ -23,7 +23,7 @@ No shared singleton browser. No public root page. No global shutdown button. Eac
 - A session-scoped CDP proxy, so Puppeteer connects through the Worker URL.
 - A returned shutdown URL for that one browser session.
 - A 5 minute container sleep horizon for jobs that fail to clean up.
-- `standard-4` container sizing, configured Chrome heap/window settings, Mac Chrome-like page defaults, SwiftShader/ANGLE software graphics, an explicit desktop font base plus every available Debian `fonts-*` package, browser font aliases, and structured browser lifecycle logs.
+- `standard-4` container sizing, configured Chrome heap/window settings, Mac Chrome-like page defaults, SwiftShader/ANGLE software graphics, a curated desktop/web font base, browser font aliases, and structured browser lifecycle logs.
 - CDP-level pre-capture settling for `Page.captureSnapshot`, so MHTML archives wait briefly for DOM readiness, fonts, image decodes, idle time, dynamic media rasterization, and compositor frames before capture.
 - Structured request, session, browser, CDP proxy, auth, health, and shutdown logs across Worker and container.
 
@@ -251,7 +251,7 @@ Breamer starts a Mac Chrome-like default browser: high-DPI desktop viewport, mac
 
 Breamer automatically settles pages before proxied `Page.captureSnapshot` calls. The settle step waits for DOM readiness, `document.fonts.ready`, pending image decodes, CSS image URLs, pseudo-element images, mask images, idle time, and a few compositor frames. It briefly scrolls through the page to trigger lazy-loaded content, traverses open shadow roots for images and dynamic media, then restores the scroll position. It also replaces readable canvas elements and current video frames with PNG images so MHTML archives do not lose dynamic pixels. If the settle step fails or times out, capture still proceeds and the event is logged.
 
-The container image runs official Google Chrome Stable, includes Mesa/Vulkan/GL libraries for Chrome's software graphics path, installs a named desktop font base, then installs every available Debian package whose name starts with `fonts-*`. That keeps the image heavy on system-level font coverage without vendoring the full live Google Fonts repository. Fontconfig aliases map common proprietary stacks such as Arial, Helvetica, Times New Roman, Courier New, Georgia, Verdana, Tahoma, Consolas, Calibri, Cambria, Segoe UI, SF Pro, Material Icons, Font Awesome, and Apple/Segoe emoji to available metric-compatible fonts.
+The container image runs official Google Chrome Stable, includes Mesa/Vulkan/GL libraries for Chrome's software graphics path, and installs a curated high-coverage font base instead of vendoring Google Fonts or every Debian `fonts-*` package. The font set keeps metric-compatible Office/core web fonts, Noto core/CJK/emoji coverage, common UI fonts, code fonts, Material Icons, and Font Awesome. Fontconfig aliases map common proprietary stacks such as Arial, Helvetica, Times New Roman, Courier New, Georgia, Verdana, Tahoma, Consolas, Calibri, Cambria, Segoe UI, SF Pro, Material Icons, Font Awesome, and Apple/Segoe emoji to available metric-compatible fonts.
 
 Callers still own page-specific capture correctness. Before `Page.captureSnapshot`, set any target-specific viewport, user agent, locale/media, and wait policy your archive needs.
 

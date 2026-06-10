@@ -63,29 +63,31 @@ RUN apt-get update \
   && curl -fsSL -o /tmp/google-chrome-stable.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/google-chrome-stable.deb \
   && rm -f /tmp/google-chrome-stable.deb \
-  && desktop_font_packages=" \
+  && font_packages=" \
+    fonts-cascadia-code \
     fonts-croscore \
-    fonts-dejavu \
+    fonts-crosextra-caladea \
+    fonts-crosextra-carlito \
+    fonts-dejavu-core \
+    fonts-dejavu-extra \
+    fonts-firacode \
     fonts-font-awesome \
+    fonts-fork-awesome \
+    fonts-hack \
     fonts-inter \
     fonts-liberation2 \
     fonts-material-design-icons-iconfont \
-    fonts-noto \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     fonts-noto-core \
-    fonts-noto-extra \
     fonts-noto-ui-core \
     fonts-open-sans \
     fonts-roboto \
     fonts-symbola \
+    fonts-texgyre \
     fonts-urw-base35 \
   " \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $desktop_font_packages \
-  && font_packages="$(apt-cache pkgnames fonts- | sort -u)" \
-  && if [ -n "$font_packages" ]; then \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $font_packages; \
-  fi \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $font_packages \
   && rm -rf /var/lib/apt/lists/*
 
 COPY docker/fontconfig/breamer.conf /etc/fonts/conf.d/50-breamer-browser-fonts.conf
