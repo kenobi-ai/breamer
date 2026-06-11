@@ -267,6 +267,10 @@ test("CDP proxy settles pages before captureSnapshot", async () => {
     "data-breamer-fonts-inlined",
   );
   expect(settleCommand.params.expression).toContain("@font-face");
+  expect(settleCommand.params.expression).toContain(
+    'document.querySelectorAll("p div")',
+  );
+  expect(settleCommand.params.expression).toContain("normalizedParagraphDivs");
 
   upstream.emit(
     "message",

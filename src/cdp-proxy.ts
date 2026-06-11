@@ -655,6 +655,34 @@ export const buildArchiveSettleExpression = (
 
         return result;
       };
+      const normalizeInvalidParagraphDivs = () => {
+        let normalized = 0;
+
+        for (const element of Array.from(document.querySelectorAll("p div"))) {
+          if (!(element instanceof HTMLDivElement) || !element.isConnected) {
+            continue;
+          }
+
+          const paragraph = element.closest("p");
+          if (!paragraph) {
+            continue;
+          }
+
+          const replacement = document.createElement("span");
+          for (const attribute of Array.from(element.attributes)) {
+            replacement.setAttribute(attribute.name, attribute.value);
+          }
+
+          while (element.firstChild) {
+            replacement.appendChild(element.firstChild);
+          }
+
+          element.replaceWith(replacement);
+          normalized++;
+        }
+
+        return normalized;
+      };
 
       const initialFontsReady = document.fonts?.ready ?? Promise.resolve();
       const lateLayoutFloor = delay(250);
@@ -682,6 +710,7 @@ export const buildArchiveSettleExpression = (
         delay(Math.max(1, remainingMs())),
       ]);
 
+      const normalizedParagraphDivs = normalizeInvalidParagraphDivs();
       const rasterized = rasterizeDynamicMedia();
       await nextFrame();
       await nextFrame();
@@ -695,6 +724,7 @@ export const buildArchiveSettleExpression = (
         imageCount: collectImages().length,
         fonts,
         lazyScroll,
+        normalizedParagraphDivs,
         rasterized,
       };
     },
