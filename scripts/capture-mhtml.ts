@@ -3,7 +3,10 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer";
-import { buildArchiveSettleExpression } from "../src/cdp-proxy.ts";
+import {
+  buildArchiveSettleExpression,
+  embedExternalFontResourcesInMhtml,
+} from "../src/cdp-proxy.ts";
 
 type WaitUntil = "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
 
@@ -742,21 +745,26 @@ const captureMhtml = async (options: CliOptions): Promise<void> => {
       options.snapshotTimeoutMs,
       `Timed out after ${options.snapshotTimeoutMs}ms while capturing MHTML`,
     );
+    console.log("Embedding external font resources");
+    const embeddedSnapshot = await embedExternalFontResourcesInMhtml(
+      snapshot.data,
+    );
 
     const outputPath = path.resolve(
       options.outputPath ??
         defaultOutputPath(options.targetUrl, options.outputDir),
     );
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await Bun.write(outputPath, snapshot.data);
+    await Bun.write(outputPath, embeddedSnapshot.data);
 
-    const archiveSize = Buffer.byteLength(snapshot.data, "utf8");
+    const archiveSize = Buffer.byteLength(embeddedSnapshot.data, "utf8");
     console.log(
       JSON.stringify(
         {
           archiveSize,
           archiveSizeMb: Number((archiveSize / 1024 / 1024).toFixed(2)),
           archiveSettle,
+          embeddedFonts: embeddedSnapshot.fonts,
           fingerprint,
           finalUrl,
           outputPath,

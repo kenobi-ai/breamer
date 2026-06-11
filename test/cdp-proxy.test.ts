@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { WebSocket } from "ws";
-import { pipeWebSockets } from "../src/cdp-proxy.ts";
+import {
+  embedExternalFontResourcesInMhtml,
+  pipeWebSockets,
+} from "../src/cdp-proxy.ts";
 
 interface SentFrame {
   data: WebSocket.RawData;
@@ -33,6 +36,24 @@ const asWebSocket = (socket: MockSocket): WebSocket =>
   socket as unknown as WebSocket;
 
 const flushProxyQueue = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const fontArchiveFixture = () => {
+  const boundary = "----MultipartBoundary--test----";
+  return [
+    "MIME-Version: 1.0",
+    "Content-Type: multipart/related;",
+    `\tboundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/css",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    '@font-face { font-family: Test; src: url("https://cdn.example.com/fonts/TestFo=',
+    'nt.woff2") format("woff2"); }',
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+};
 
 const renderingDefaults = {
   acceptLanguage: "en-GB,en-US;q=0.9,en;q=0.8",
@@ -69,6 +90,35 @@ const renderingDefaults = {
   },
   width: 1470,
 };
+
+test("MHTML font embedding adds external font resources as archive parts", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+    })) as unknown as typeof fetch;
+
+  try {
+    const result = await embedExternalFontResourcesInMhtml(
+      fontArchiveFixture(),
+    );
+
+    expect(result.fonts).toEqual({
+      bytes: 3,
+      discovered: 1,
+      embedded: 1,
+      failed: 0,
+      skippedExisting: 0,
+    });
+    expect(result.data).toContain("Content-Type: font/woff2");
+    expect(result.data).toContain(
+      "Content-Location: https://cdn.example.com/fonts/TestFont.woff2",
+    );
+    expect(result.data).toContain("AQID");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("CDP proxy preserves text frames from client to upstream", async () => {
   const client = new MockSocket();
@@ -295,6 +345,71 @@ test("CDP proxy settles pages before captureSnapshot", async () => {
     method: "Page.captureSnapshot",
   });
   expect(settleEvents).toEqual(["completed"]);
+});
+
+test("CDP proxy embeds external font resources in captureSnapshot responses", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(new Uint8Array([4, 5, 6]), {
+      status: 200,
+    })) as unknown as typeof fetch;
+
+  try {
+    const client = new MockSocket();
+    const upstream = new MockSocket();
+
+    pipeWebSockets(asWebSocket(client), asWebSocket(upstream), {
+      archiveSettleTimeoutMs: 25,
+    });
+
+    client.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          id: 10,
+          sessionId: "page-session",
+          method: "Page.captureSnapshot",
+        }),
+      ),
+      false,
+    );
+    await flushProxyQueue();
+
+    const settleCommand = JSON.parse(upstream.sent[0]?.data.toString() ?? "{}");
+    upstream.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          id: settleCommand.id,
+          result: { result: { type: "object", value: {} } },
+        }),
+      ),
+      false,
+    );
+    await flushProxyQueue();
+
+    upstream.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          id: 10,
+          result: { data: fontArchiveFixture() },
+        }),
+      ),
+      false,
+    );
+    await flushProxyQueue();
+
+    expect(client.sent).toHaveLength(1);
+    const response = JSON.parse(client.sent[0]?.data.toString() ?? "{}");
+    expect(response.result.data).toContain("Content-Type: font/woff2");
+    expect(response.result.data).toContain(
+      "Content-Location: https://cdn.example.com/fonts/TestFont.woff2",
+    );
+    expect(response.result.data).toContain("BAUG");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("CDP proxy still captures when archive settling times out", async () => {

@@ -131,6 +131,191 @@ const cdpIdKey = (id: unknown): string | undefined => {
   return undefined;
 };
 
+interface MhtmlFontEmbedOptions {
+  maxFontBytes?: number;
+  maxTotalBytes?: number;
+  timeoutMs?: number;
+}
+
+interface MhtmlFontEmbedResult {
+  data: string;
+  fonts: {
+    bytes: number;
+    discovered: number;
+    embedded: number;
+    failed: number;
+    skippedExisting: number;
+  };
+}
+
+const decodeQuotedPrintableForUrls = (value: string): string =>
+  value
+    .replace(/=\r?\n/g, "")
+    .replace(/=([0-9a-f]{2})/gi, (_match, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    );
+
+const extractExternalFontUrlsFromMhtml = (mhtml: string): string[] => {
+  const decoded = decodeQuotedPrintableForUrls(mhtml);
+  const urls = new Set<string>();
+
+  for (const match of decoded.matchAll(
+    /https?:\/\/[^\s"'()<>;\\]+?\.(?:otf|ttf|woff2?)(?:\?[^\s"'()<>;\\]*)?/gi,
+  )) {
+    const rawUrl = match[0]?.replace(/&amp;/g, "&");
+    if (!rawUrl) {
+      continue;
+    }
+
+    try {
+      urls.add(new URL(rawUrl).toString());
+    } catch (error) {
+      void error;
+    }
+  }
+
+  return Array.from(urls);
+};
+
+const findMhtmlBoundary = (mhtml: string): string | undefined => {
+  const match = /boundary=(?:"([^"]+)"|([^\s;]+))/i.exec(mhtml);
+  return match?.[1] ?? match?.[2];
+};
+
+const fontContentType = (url: string): string => {
+  const pathname = new URL(url).pathname.toLowerCase();
+  if (pathname.endsWith(".woff2")) {
+    return "font/woff2";
+  }
+  if (pathname.endsWith(".woff")) {
+    return "font/woff";
+  }
+  if (pathname.endsWith(".ttf")) {
+    return "font/ttf";
+  }
+  if (pathname.endsWith(".otf")) {
+    return "font/otf";
+  }
+  return "application/octet-stream";
+};
+
+const wrapBase64 = (value: string): string =>
+  value.match(/.{1,76}/g)?.join("\r\n") ?? value;
+
+const hasMhtmlContentLocation = (mhtml: string, url: string): boolean => {
+  const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^Content-Location:\\s*${escaped}\\s*$`, "im").test(mhtml);
+};
+
+const fetchFontForMhtml = async (
+  url: string,
+  timeoutMs: number,
+): Promise<Uint8Array | undefined> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: "font/woff2,font/woff,font/ttf,font/otf,*/*",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    return new Uint8Array(await response.arrayBuffer());
+  } catch (error) {
+    void error;
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const embedExternalFontResourcesInMhtml = async (
+  mhtml: string,
+  options: MhtmlFontEmbedOptions = {},
+): Promise<MhtmlFontEmbedResult> => {
+  const boundary = findMhtmlBoundary(mhtml);
+  const urls = extractExternalFontUrlsFromMhtml(mhtml);
+  const maxFontBytes = options.maxFontBytes ?? 12 * 1024 * 1024;
+  const maxTotalBytes = options.maxTotalBytes ?? 64 * 1024 * 1024;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const fonts = {
+    bytes: 0,
+    discovered: urls.length,
+    embedded: 0,
+    failed: 0,
+    skippedExisting: 0,
+  };
+
+  if (!boundary || urls.length === 0) {
+    return { data: mhtml, fonts };
+  }
+
+  const delimiter = `--${boundary}`;
+  const closingDelimiter = `${delimiter}--`;
+  const closingIndex = mhtml.lastIndexOf(closingDelimiter);
+  if (closingIndex === -1) {
+    return { data: mhtml, fonts };
+  }
+
+  const candidates = urls.filter((url) => {
+    if (!hasMhtmlContentLocation(mhtml, url)) {
+      return true;
+    }
+
+    fonts.skippedExisting++;
+    return false;
+  });
+
+  const fetched = await Promise.all(
+    candidates.map(async (url) => ({
+      bytes: await fetchFontForMhtml(url, timeoutMs),
+      url,
+    })),
+  );
+
+  const parts: string[] = [];
+  for (const { bytes, url } of fetched) {
+    if (!bytes || bytes.byteLength <= 0 || bytes.byteLength > maxFontBytes) {
+      fonts.failed++;
+      continue;
+    }
+    if (fonts.bytes + bytes.byteLength > maxTotalBytes) {
+      fonts.failed++;
+      continue;
+    }
+
+    fonts.bytes += bytes.byteLength;
+    fonts.embedded++;
+    parts.push(
+      [
+        delimiter,
+        `Content-Type: ${fontContentType(url)}`,
+        "Content-Transfer-Encoding: base64",
+        `Content-Location: ${url}`,
+        "",
+        wrapBase64(Buffer.from(bytes).toString("base64")),
+        "",
+      ].join("\r\n"),
+    );
+  }
+
+  if (parts.length === 0) {
+    return { data: mhtml, fonts };
+  }
+
+  return {
+    data: `${mhtml.slice(0, closingIndex)}${parts.join("")}${mhtml.slice(
+      closingIndex,
+    )}`,
+    fonts,
+  };
+};
+
 export const buildArchiveSettleExpression = (
   timeoutMs: number,
   autoScrollBeforeCapture: boolean,
@@ -445,15 +630,20 @@ export const buildArchiveSettleExpression = (
       const inlineFontFaces = async () => {
         const result = {
           bytes: 0,
+          externalStyleSheets: 0,
           failed: 0,
           fontFaceCount: 0,
+          fontUrlCount: 0,
           inlined: 0,
+          inlineStyleCount: 0,
+          readBlockedStyleSheetCount: 0,
           styleSheetCount: 0,
         };
         const maxFontBytes = 12 * 1024 * 1024;
         const maxTotalBytes = 48 * 1024 * 1024;
         const fontCache = new Map<string, Promise<string | undefined>>();
         const fontFaceBlocks: Array<{ baseUrl: string; cssText: string }> = [];
+        const fontFaceBlockKeys = new Set<string>();
         const withRemainingDeadline = async <T>(
           promise: Promise<T>,
         ): Promise<T | undefined> => {
@@ -467,27 +657,41 @@ export const buildArchiveSettleExpression = (
             delay(timeout).then(() => undefined),
           ]);
         };
+        const addFontFaceBlocks = (cssText: string, baseUrl: string) => {
+          for (const block of collectFontFaceBlocks(cssText, baseUrl)) {
+            const key = `${block.baseUrl}\n${block.cssText}`;
+            if (fontFaceBlockKeys.has(key)) {
+              continue;
+            }
 
-        const readStyleSheet = async (styleSheet: CSSStyleSheet) => {
+            fontFaceBlockKeys.add(key);
+            fontFaceBlocks.push(block);
+          }
+        };
+        const readCssRules = (styleSheet: CSSStyleSheet): boolean => {
           const baseUrl = styleSheet.href ?? document.baseURI;
 
           try {
             const cssText = Array.from(styleSheet.cssRules)
               .map((rule) => rule.cssText)
               .join("\n");
-            fontFaceBlocks.push(...collectFontFaceBlocks(cssText, baseUrl));
-            return;
+            addFontFaceBlocks(cssText, baseUrl);
+            return true;
           } catch (error) {
             void error;
+            return false;
           }
-
-          if (!styleSheet.href || remainingMs() < 150) {
+        };
+        const fetchStyleSheet = async (href: string) => {
+          if (remainingMs() < 150) {
             return;
           }
+
+          result.externalStyleSheets++;
 
           try {
             const response = await withRemainingDeadline(
-              fetch(styleSheet.href, {
+              fetch(href, {
                 cache: "force-cache",
                 credentials: "include",
               }),
@@ -503,20 +707,81 @@ export const buildArchiveSettleExpression = (
               return;
             }
 
-            fontFaceBlocks.push(...collectFontFaceBlocks(cssText, baseUrl));
+            addFontFaceBlocks(cssText, href);
           } catch (error) {
             void error;
             result.failed++;
           }
         };
 
-        for (const styleSheet of Array.from(document.styleSheets)) {
-          if (remainingMs() < 150) {
-            break;
+        for (const styleElement of Array.from(
+          document.querySelectorAll("style"),
+        )) {
+          const cssText = styleElement.textContent;
+          if (!cssText) {
+            continue;
           }
 
+          result.inlineStyleCount++;
+          addFontFaceBlocks(cssText, document.baseURI);
+        }
+
+        const blockedStyleSheetHrefs: string[] = [];
+        for (const styleSheet of Array.from(document.styleSheets)) {
           result.styleSheetCount++;
-          await readStyleSheet(styleSheet);
+          if (readCssRules(styleSheet)) {
+            continue;
+          }
+
+          result.readBlockedStyleSheetCount++;
+          if (styleSheet.href) {
+            blockedStyleSheetHrefs.push(styleSheet.href);
+          }
+        }
+
+        await Promise.race([
+          Promise.allSettled(
+            blockedStyleSheetHrefs.map((href) => fetchStyleSheet(href)),
+          ),
+          delay(Math.max(1, remainingMs())),
+        ]);
+
+        const performanceFontUrls =
+          "getEntriesByType" in performance
+            ? performance
+                .getEntriesByType("resource")
+                .filter(
+                  (entry): entry is PerformanceResourceTiming =>
+                    entry instanceof PerformanceResourceTiming &&
+                    (entry.initiatorType === "font" ||
+                      /\.(?:otf|ttf|woff2?)(?:[?#]|$)/i.test(entry.name)),
+                )
+                .map((entry) => entry.name)
+            : [];
+
+        if (
+          performanceFontUrls.length > 0 &&
+          fontFaceBlocks.length > 0 &&
+          remainingMs() >= 150
+        ) {
+          const knownFontCssText = fontFaceBlocks
+            .map((block) => block.cssText)
+            .join("\n");
+          for (const url of performanceFontUrls) {
+            if (knownFontCssText.includes(url)) {
+              continue;
+            }
+
+            const baseName = decodeURIComponent(
+              url.split("/").pop()?.split("?")[0]?.split("#")[0] ?? "",
+            );
+            const matchingBlock = fontFaceBlocks.find((block) =>
+              baseName ? block.cssText.includes(baseName) : false,
+            );
+            if (matchingBlock) {
+              addFontFaceBlocks(matchingBlock.cssText, url);
+            }
+          }
         }
 
         result.fontFaceCount = fontFaceBlocks.length;
@@ -613,6 +878,7 @@ export const buildArchiveSettleExpression = (
             pieces.push(cssText.slice(cursor, match.index));
             const dataUrl = await fetchFontAsDataUrl(match[2] ?? "", baseUrl);
             if (dataUrl) {
+              result.fontUrlCount++;
               pieces.push(`url("${dataUrl}")`);
               changed = true;
               result.inlined++;
@@ -987,6 +1253,7 @@ export const pipeWebSockets = (
   const defaultedPageSessionIds = new Set<string>();
   const defaultingPageSessionIds = new Map<string, Promise<void>>();
   const pageSessionIds = new Set<string>();
+  const pendingCaptureSnapshotIds = new Set<string>();
   const suppressedInternalIds = new Set<string>();
   const settleBeforeCaptureSnapshot =
     options.settleBeforeCaptureSnapshot ?? true;
@@ -1298,6 +1565,13 @@ export const pipeWebSockets = (
       await applyRenderingDefaultsOnce(pageSessionId, "client-command");
     }
 
+    if (message?.method === "Page.captureSnapshot") {
+      const key = cdpIdKey(message.id);
+      if (key) {
+        pendingCaptureSnapshotIds.add(key);
+      }
+    }
+
     if (
       shouldSettleBeforeCaptureSnapshot(message, settleBeforeCaptureSnapshot)
     ) {
@@ -1350,6 +1624,20 @@ export const pipeWebSockets = (
 
       if (suppressedInternalIds.delete(key)) {
         return;
+      }
+
+      if (pendingCaptureSnapshotIds.delete(key)) {
+        const result = message?.result as { data?: unknown } | undefined;
+        if (typeof result?.data === "string") {
+          const embeddedSnapshot = await embedExternalFontResourcesInMhtml(
+            result.data,
+          );
+          result.data = embeddedSnapshot.data;
+          if (client.readyState === WebSocket.OPEN) {
+            sendFrame(client, JSON.stringify(message), false);
+          }
+          return;
+        }
       }
     }
 
