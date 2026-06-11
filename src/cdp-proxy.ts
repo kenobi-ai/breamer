@@ -655,33 +655,169 @@ export const buildArchiveSettleExpression = (
 
         return result;
       };
-      const normalizeInvalidParagraphDivs = () => {
-        let normalized = 0;
+      const normalizeParserUnsafeParagraphs = () => {
+        const paragraphBreakingTags = new Set([
+          "ADDRESS",
+          "ARTICLE",
+          "ASIDE",
+          "BLOCKQUOTE",
+          "CENTER",
+          "DD",
+          "DETAILS",
+          "DIALOG",
+          "DIR",
+          "DIV",
+          "DL",
+          "DT",
+          "FIELDSET",
+          "FIGCAPTION",
+          "FIGURE",
+          "FOOTER",
+          "FORM",
+          "H1",
+          "H2",
+          "H3",
+          "H4",
+          "H5",
+          "H6",
+          "HEADER",
+          "HGROUP",
+          "HR",
+          "LI",
+          "LISTING",
+          "MAIN",
+          "MENU",
+          "NAV",
+          "OL",
+          "P",
+          "PLAINTEXT",
+          "PRE",
+          "SEARCH",
+          "SECTION",
+          "SUMMARY",
+          "TABLE",
+          "UL",
+          "XMP",
+        ]);
+        const preservedProperties = [
+          "align-self",
+          "background-color",
+          "border-bottom-color",
+          "border-bottom-left-radius",
+          "border-bottom-right-radius",
+          "border-bottom-style",
+          "border-bottom-width",
+          "border-left-color",
+          "border-left-style",
+          "border-left-width",
+          "border-right-color",
+          "border-right-style",
+          "border-right-width",
+          "border-top-color",
+          "border-top-left-radius",
+          "border-top-right-radius",
+          "border-top-style",
+          "border-top-width",
+          "box-sizing",
+          "color",
+          "display",
+          "flex-basis",
+          "flex-grow",
+          "flex-shrink",
+          "font-family",
+          "font-size",
+          "font-stretch",
+          "font-style",
+          "font-variant",
+          "font-weight",
+          "grid-area",
+          "grid-column-end",
+          "grid-column-start",
+          "grid-row-end",
+          "grid-row-start",
+          "height",
+          "justify-self",
+          "letter-spacing",
+          "line-height",
+          "margin-bottom",
+          "margin-left",
+          "margin-right",
+          "margin-top",
+          "max-height",
+          "max-width",
+          "min-height",
+          "min-width",
+          "opacity",
+          "order",
+          "overflow-wrap",
+          "padding-bottom",
+          "padding-left",
+          "padding-right",
+          "padding-top",
+          "text-align",
+          "text-decoration-color",
+          "text-decoration-line",
+          "text-decoration-style",
+          "text-decoration-thickness",
+          "text-indent",
+          "text-transform",
+          "vertical-align",
+          "visibility",
+          "white-space",
+          "width",
+          "word-break",
+          "word-spacing",
+        ];
+        let descendants = 0;
+        let paragraphs = 0;
 
-        for (const element of Array.from(document.querySelectorAll("p div"))) {
-          if (!(element instanceof HTMLDivElement) || !element.isConnected) {
+        const parserBreakingDescendants = (paragraph: HTMLParagraphElement) =>
+          Array.from(paragraph.querySelectorAll("*")).filter((element) =>
+            paragraphBreakingTags.has(element.tagName),
+          );
+
+        for (const paragraph of collectElements().filter(
+          (element): element is HTMLParagraphElement =>
+            element instanceof HTMLParagraphElement,
+        )) {
+          if (!paragraph.isConnected) {
             continue;
           }
 
-          const paragraph = element.closest("p");
-          if (!paragraph) {
+          const breakingDescendants = parserBreakingDescendants(paragraph);
+          if (breakingDescendants.length === 0) {
             continue;
           }
 
-          const replacement = document.createElement("span");
-          for (const attribute of Array.from(element.attributes)) {
+          const style = getComputedStyle(paragraph);
+          const replacement = document.createElement("div");
+
+          for (const attribute of Array.from(paragraph.attributes)) {
             replacement.setAttribute(attribute.name, attribute.value);
           }
+          replacement.setAttribute("data-breamer-original-tag", "p");
 
-          while (element.firstChild) {
-            replacement.appendChild(element.firstChild);
+          for (const property of preservedProperties) {
+            const value = style.getPropertyValue(property);
+            if (value) {
+              replacement.style.setProperty(
+                property,
+                value,
+                style.getPropertyPriority(property),
+              );
+            }
           }
 
-          element.replaceWith(replacement);
-          normalized++;
+          while (paragraph.firstChild) {
+            replacement.appendChild(paragraph.firstChild);
+          }
+
+          paragraph.replaceWith(replacement);
+          descendants += breakingDescendants.length;
+          paragraphs++;
         }
 
-        return normalized;
+        return { descendants, paragraphs };
       };
 
       const initialFontsReady = document.fonts?.ready ?? Promise.resolve();
@@ -710,7 +846,8 @@ export const buildArchiveSettleExpression = (
         delay(Math.max(1, remainingMs())),
       ]);
 
-      const normalizedParagraphDivs = normalizeInvalidParagraphDivs();
+      const normalizedParserUnsafeParagraphs =
+        normalizeParserUnsafeParagraphs();
       const rasterized = rasterizeDynamicMedia();
       await nextFrame();
       await nextFrame();
@@ -724,7 +861,7 @@ export const buildArchiveSettleExpression = (
         imageCount: collectImages().length,
         fonts,
         lazyScroll,
-        normalizedParagraphDivs,
+        normalizedParserUnsafeParagraphs,
         rasterized,
       };
     },
