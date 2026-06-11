@@ -144,6 +144,7 @@ interface MhtmlFontEmbedResult {
     discovered: number;
     embedded: number;
     failed: number;
+    skippedInlined: number;
     skippedExisting: number;
   };
 }
@@ -155,8 +156,7 @@ const decodeQuotedPrintableForUrls = (value: string): string =>
       String.fromCharCode(Number.parseInt(hex, 16)),
     );
 
-const extractExternalFontUrlsFromMhtml = (mhtml: string): string[] => {
-  const decoded = decodeQuotedPrintableForUrls(mhtml);
+const extractExternalFontUrlsFromDecodedMhtml = (decoded: string): string[] => {
   const urls = new Set<string>();
 
   for (const match of decoded.matchAll(
@@ -175,6 +175,154 @@ const extractExternalFontUrlsFromMhtml = (mhtml: string): string[] => {
   }
 
   return Array.from(urls);
+};
+
+const cssDeclarationValue = (
+  declarationBlock: string,
+  property: string,
+): string | undefined => {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escapedProperty}\\s*:\\s*([^;}]+)`, "i").exec(
+    declarationBlock,
+  );
+  return match?.[1]?.trim();
+};
+
+const normalizeCssDescriptorValue = (
+  value: string | undefined,
+  fallback: string,
+): string =>
+  (value ?? fallback)
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+const normalizeFontWeightDescriptor = (value: string | undefined): string => {
+  const normalized = normalizeCssDescriptorValue(value, "400");
+  if (normalized === "normal") {
+    return "400";
+  }
+  if (normalized === "bold") {
+    return "700";
+  }
+  return normalized;
+};
+
+const fontFaceDescriptorKey = (
+  declarationBlock: string,
+): string | undefined => {
+  const family = normalizeCssDescriptorValue(
+    cssDeclarationValue(declarationBlock, "font-family"),
+    "",
+  );
+  if (!family) {
+    return undefined;
+  }
+
+  const style = normalizeCssDescriptorValue(
+    cssDeclarationValue(declarationBlock, "font-style"),
+    "normal",
+  );
+  const weight = normalizeFontWeightDescriptor(
+    cssDeclarationValue(declarationBlock, "font-weight"),
+  );
+  const stretch = normalizeCssDescriptorValue(
+    cssDeclarationValue(declarationBlock, "font-stretch"),
+    "normal",
+  );
+  const unicodeRange = normalizeCssDescriptorValue(
+    cssDeclarationValue(declarationBlock, "unicode-range"),
+    "all",
+  );
+
+  return [family, style, weight, stretch, unicodeRange].join("|");
+};
+
+const fontUrlBasename = (value: string): string | undefined => {
+  const decoded = value.replace(/&amp;/g, "&").trim();
+  let path = decoded.split(/[?#]/, 1)[0] ?? decoded;
+
+  try {
+    path = new URL(decoded).pathname;
+  } catch (error) {
+    void error;
+  }
+
+  return path.match(/[^/\\]+?\.(?:otf|ttf|woff2?)$/i)?.[0]?.toLowerCase();
+};
+
+const fontFaceUrlValues = (declarationBlock: string): string[] => {
+  const urls: string[] = [];
+  for (const match of declarationBlock.matchAll(
+    /url\(\s*(?:"([^"]+)"|'([^']+)'|([^)"'\s]+))\s*\)/gi,
+  )) {
+    const value = match[1] ?? match[2] ?? match[3];
+    if (value) {
+      urls.push(value);
+    }
+  }
+  return urls;
+};
+
+const fontFaceHasInlineFontSource = (declarationBlock: string): boolean =>
+  /url\(\s*(?:"|')?data:(?:font\/|application\/(?:font|x-font|octet-stream)|application\/x-font-ttf)/i.test(
+    declarationBlock,
+  );
+
+const collectFontFaceArchiveMetadata = (decodedMhtml: string) => {
+  const dataDescriptorKeys = new Set<string>();
+  const descriptorByBasename = new Map<string, string>();
+  const descriptorByUrl = new Map<string, string>();
+
+  for (const match of decodedMhtml.matchAll(/@font-face\s*{[^}]*}/gi)) {
+    const declarationBlock = match[0] ?? "";
+    const descriptorKey = fontFaceDescriptorKey(declarationBlock);
+    if (!descriptorKey) {
+      continue;
+    }
+
+    if (fontFaceHasInlineFontSource(declarationBlock)) {
+      dataDescriptorKeys.add(descriptorKey);
+    }
+
+    for (const rawUrl of fontFaceUrlValues(declarationBlock)) {
+      const basename = fontUrlBasename(rawUrl);
+      if (basename) {
+        descriptorByBasename.set(basename, descriptorKey);
+      }
+
+      if (!/^https?:\/\//i.test(rawUrl)) {
+        continue;
+      }
+
+      try {
+        descriptorByUrl.set(
+          new URL(rawUrl.replace(/&amp;/g, "&")).toString(),
+          descriptorKey,
+        );
+      } catch (error) {
+        void error;
+      }
+    }
+  }
+
+  return {
+    dataDescriptorKeys,
+    descriptorByBasename,
+    descriptorByUrl,
+  };
+};
+
+const hasMatchingInlineFontFace = (
+  metadata: ReturnType<typeof collectFontFaceArchiveMetadata>,
+  url: string,
+): boolean => {
+  const descriptorKey =
+    metadata.descriptorByUrl.get(url) ??
+    metadata.descriptorByBasename.get(fontUrlBasename(url) ?? "");
+
+  return descriptorKey ? metadata.dataDescriptorKeys.has(descriptorKey) : false;
 };
 
 const findMhtmlBoundary = (mhtml: string): string | undefined => {
@@ -239,7 +387,9 @@ export const embedExternalFontResourcesInMhtml = async (
   options: MhtmlFontEmbedOptions = {},
 ): Promise<MhtmlFontEmbedResult> => {
   const boundary = findMhtmlBoundary(mhtml);
-  const urls = extractExternalFontUrlsFromMhtml(mhtml);
+  const decodedMhtml = decodeQuotedPrintableForUrls(mhtml);
+  const urls = extractExternalFontUrlsFromDecodedMhtml(decodedMhtml);
+  const fontFaceMetadata = collectFontFaceArchiveMetadata(decodedMhtml);
   const maxFontBytes = options.maxFontBytes ?? 12 * 1024 * 1024;
   const maxTotalBytes = options.maxTotalBytes ?? 64 * 1024 * 1024;
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -248,6 +398,7 @@ export const embedExternalFontResourcesInMhtml = async (
     discovered: urls.length,
     embedded: 0,
     failed: 0,
+    skippedInlined: 0,
     skippedExisting: 0,
   };
 
@@ -263,6 +414,11 @@ export const embedExternalFontResourcesInMhtml = async (
   }
 
   const candidates = urls.filter((url) => {
+    if (hasMatchingInlineFontFace(fontFaceMetadata, url)) {
+      fonts.skippedInlined++;
+      return false;
+    }
+
     if (!hasMhtmlContentLocation(mhtml, url)) {
       return true;
     }

@@ -108,6 +108,7 @@ test("MHTML font embedding adds external font resources as archive parts", async
       discovered: 1,
       embedded: 1,
       failed: 0,
+      skippedInlined: 0,
       skippedExisting: 0,
     });
     expect(result.data).toContain("Content-Type: font/woff2");
@@ -115,6 +116,53 @@ test("MHTML font embedding adds external font resources as archive parts", async
       "Content-Location: https://cdn.example.com/fonts/TestFont.woff2",
     );
     expect(result.data).toContain("AQID");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("MHTML font embedding does not duplicate fonts already inlined as data URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls++;
+    return new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+    });
+  }) as unknown as typeof fetch;
+
+  try {
+    const boundary = "----MultipartBoundary--inlined-font-test----";
+    const archive = [
+      "MIME-Version: 1.0",
+      "Content-Type: multipart/related;",
+      `\tboundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/html",
+      "",
+      '<link rel="preload" href="https://cdn.example.com/_next/static/media/JJSans_Regular.woff2?dpl=test" as="font">',
+      `--${boundary}`,
+      "Content-Type: text/css",
+      "",
+      '@font-face { font-family: jjSans; font-weight: 400; font-style: normal; src: url("../media/JJSans_Regular.woff2") format("woff2"); }',
+      '@font-face { font-family: jjSans; font-weight: 400; font-style: normal; src: url("data:font/woff2;base64,d09GMg==") format("woff2"); }',
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+
+    const result = await embedExternalFontResourcesInMhtml(archive);
+
+    expect(fetchCalls).toBe(0);
+    expect(result.fonts).toEqual({
+      bytes: 0,
+      discovered: 1,
+      embedded: 0,
+      failed: 0,
+      skippedInlined: 1,
+      skippedExisting: 0,
+    });
+    expect(result.data).not.toContain("Content-Type: font/woff2");
   } finally {
     globalThis.fetch = originalFetch;
   }
